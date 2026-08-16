@@ -42,3 +42,5 @@ export const KNOWN_SOURCES = [
 export const PROXY_PRICED_SOURCES = ['american', 'alaska'] as const
 
 export const HARD_MAX_WINDOW_DAYS = 355
+
+export const APP_VERSION = '0.1.0'

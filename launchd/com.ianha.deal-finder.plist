@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  flight-deal-finder LaunchAgent (always-on service).
+
+  Install:
+    1. Replace /usr/local/bin/node below with the output of `which node`
+       (nvm/homebrew paths differ; launchd has no shell PATH).
+    2. cp launchd/com.ianha.deal-finder.plist ~/Library/LaunchAgents/
+    3. launchctl load ~/Library/LaunchAgents/com.ianha.deal-finder.plist
+  Verify:  launchctl list | grep deal-finder ; tail -f data/deal-finder.log
+  Remove:  launchctl unload ~/Library/LaunchAgents/com.ianha.deal-finder.plist
+
+  Secrets stay in .env (read by the app itself); nothing sensitive lives here.
+  Polling interval comes from config.yaml (poll.intervalHours) — not this file.
+-->
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.ianha.deal-finder</string>
+
+  <key>ProgramArguments</key>
+  <array>
+    <string>/usr/local/bin/node</string>
+    <string>/Users/iha/github/ianha/flight-deal-finder/dist/cli.js</string>
+    <string>serve</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/iha/github/ianha/flight-deal-finder</string>
+
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>KeepAlive</key>
+  <true/>
+
+  <!-- Don't spin on a crash loop. -->
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
+
+  <key>StandardOutPath</key>
+  <string>/Users/iha/github/ianha/flight-deal-finder/data/deal-finder.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/iha/github/ianha/flight-deal-finder/data/deal-finder.err.log</string>
+</dict>
+</plist>

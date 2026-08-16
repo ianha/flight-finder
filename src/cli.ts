@@ -39,11 +39,43 @@ program
   })
 
 program
+  .command('serve')
+  .description('run the always-on service: internal scheduler + local web console (127.0.0.1)')
+  .action(async () => {
+    const { serveCommand } = await import('./commands/serve.js')
+    await serveCommand(globalOpts())
+  })
+
+program
   .command('test-email')
   .description('send a canned digest through real SMTP to verify credentials')
   .action(async () => {
     const { testEmailCommand } = await import('./commands/testEmail.js')
     await testEmailCommand(globalOpts())
+  })
+
+program
+  .command('status')
+  .description('quota usage, last cycle, data freshness, recent alerts')
+  .action(async () => {
+    const { statusCommand } = await import('./commands/status.js')
+    await statusCommand(globalOpts())
+  })
+
+program
+  .command('routes-audit')
+  .description('per-route crawl-horizon report (how far out seats.aero actually covers the grid)')
+  .action(async () => {
+    const { routesAuditCommand } = await import('./commands/routesAudit.js')
+    await routesAuditCommand(globalOpts())
+  })
+
+program
+  .command('probe-british')
+  .description('empirically test whether the undocumented BA Avios source works in the API')
+  .action(async () => {
+    const { probeBritishCommand } = await import('./commands/probeBritish.js')
+    await probeBritishCommand(globalOpts())
   })
 
 program.parseAsync().catch((err: unknown) => {
