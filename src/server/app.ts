@@ -8,7 +8,15 @@ import type {
   CyclesResponse,
 } from '../shared/apiTypes.js'
 import type { InFlightInfo } from '../scheduler.js'
-import { buildStatus, recentCycles } from './queries.js'
+import {
+  buildStatus,
+  recentCycles,
+  queryOneways,
+  queryRoundtrips,
+  queryCalendar,
+  queryAlerts,
+} from './queries.js'
+import type { Direction } from '../types.js'
 
 export interface SchedulerFacade {
   cycleInFlight(): InFlightInfo | null
@@ -51,6 +59,63 @@ export function buildApp(deps: AppDeps): Hono {
   app.get('/api/cycles', (c) => {
     const limit = clampInt(c.req.query('limit'), 1, 200, 20)
     return c.json({ cycles: recentCycles(deps.db, limit) } satisfies CyclesResponse)
+  })
+
+  app.get('/api/deals/oneway', (c) => {
+    const q = c.req.query.bind(c.req)
+    return c.json(
+      queryOneways(deps.db, deps.getConfig(), {
+        ...(q('origin') ? { origin: q('origin')!.toUpperCase() } : {}),
+        ...(q('destination') ? { destination: q('destination')!.toUpperCase() } : {}),
+        ...(q('source') ? { source: q('source')! } : {}),
+        ...(parseDirection(q('direction')) ? { direction: parseDirection(q('direction'))! } : {}),
+        ...(parseIntOpt(q('maxPoints')) !== undefined ? { maxPoints: parseIntOpt(q('maxPoints'))! } : {}),
+        ...(parseBool(q('directOnly')) !== undefined ? { directOnly: parseBool(q('directOnly'))! } : {}),
+        ...(parseBool(q('includeEstimates')) !== undefined
+          ? { includeEstimates: parseBool(q('includeEstimates'))! }
+          : {}),
+        ...(q('from') ? { from: q('from')! } : {}),
+        ...(q('to') ? { to: q('to')! } : {}),
+        ...(q('sort') === 'date' ? { sort: 'date' as const } : {}),
+        limit: clampInt(q('limit'), 1, 1000, 100),
+        offset: clampInt(q('offset'), 0, 100_000, 0),
+      }),
+    )
+  })
+
+  app.get('/api/deals/roundtrip', (c) => {
+    const q = c.req.query.bind(c.req)
+    return c.json(
+      queryRoundtrips(deps.db, deps.getConfig(), {
+        ...(q('origin') ? { origin: q('origin')!.toUpperCase() } : {}),
+        ...(parseIntOpt(q('maxTotal')) !== undefined ? { maxTotal: parseIntOpt(q('maxTotal'))! } : {}),
+        ...(parseIntOpt(q('minStay')) !== undefined ? { minStay: parseIntOpt(q('minStay'))! } : {}),
+        ...(parseIntOpt(q('maxStay')) !== undefined ? { maxStay: parseIntOpt(q('maxStay'))! } : {}),
+        ...(parseBool(q('sameCityReturn')) !== undefined
+          ? { sameCityReturn: parseBool(q('sameCityReturn'))! }
+          : {}),
+        ...(parseBool(q('includeEstimates')) !== undefined
+          ? { includeEstimates: parseBool(q('includeEstimates'))! }
+          : {}),
+        limit: clampInt(q('limit'), 1, 1000, 100),
+        offset: clampInt(q('offset'), 0, 100_000, 0),
+      }),
+    )
+  })
+
+  app.get('/api/availability/calendar', (c) => {
+    const direction = parseDirection(c.req.query('direction')) ?? 'outbound'
+    const origin = c.req.query('origin')?.toUpperCase()
+    const destination = c.req.query('destination')?.toUpperCase()
+    return c.json({ days: queryCalendar(deps.db, deps.getConfig(), direction, origin, destination) })
+  })
+
+  app.get('/api/alerts', (c) => {
+    const limit = clampInt(c.req.query('limit'), 1, 500, 50)
+    const kind = c.req.query('kind')
+    return c.json({
+      alerts: queryAlerts(deps.db, limit, kind === 'oneway' || kind === 'roundtrip' ? kind : undefined),
+    })
   })
 
   app.post('/api/run', (c) => {
@@ -96,4 +161,21 @@ export function clampInt(
   const n = parseInt(raw, 10)
   if (!Number.isFinite(n)) return fallback
   return Math.min(Math.max(n, min), max)
+}
+
+function parseIntOpt(raw: string | undefined): number | undefined {
+  if (raw === undefined) return undefined
+  const n = parseInt(raw, 10)
+  return Number.isFinite(n) ? n : undefined
+}
+
+function parseBool(raw: string | undefined): boolean | undefined {
+  if (raw === undefined) return undefined
+  if (raw === 'true' || raw === '1') return true
+  if (raw === 'false' || raw === '0') return false
+  return undefined
+}
+
+function parseDirection(raw: string | undefined): Direction | undefined {
+  return raw === 'outbound' || raw === 'return' ? raw : undefined
 }

@@ -1,11 +1,50 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
-import { openDb, incrementApiCalls, startCycle, finishCycle, metaSet, type Db } from '../src/db.js'
+import {
+  openDb,
+  incrementApiCalls,
+  startCycle,
+  finishCycle,
+  metaSet,
+  upsertAvailability,
+  recordAlertedDeals,
+  type Db,
+} from '../src/db.js'
 import { parseConfig } from '../src/config.js'
 import { buildApp, type SchedulerFacade } from '../src/server/app.js'
-import type { StatusResponse, CyclesResponse, RunConflictResponse } from '../src/shared/apiTypes.js'
+import type {
+  StatusResponse,
+  CyclesResponse,
+  RunConflictResponse,
+  OneWayDealsResponse,
+  RoundtripDealsResponse,
+  CalendarResponse,
+  AlertsResponse,
+} from '../src/shared/apiTypes.js'
 import { Scheduler } from '../src/scheduler.js'
 import type { CycleOutcome } from '../src/poll.js'
+import { normalizeAvailability } from '../src/types.js'
+import { makeAvailability, type AvailabilityOverrides } from './helpers/fixtures.js'
+
+function seed(db: Db, over: AvailabilityOverrides, direction: 'outbound' | 'return'): void {
+  const rec = normalizeAvailability(makeAvailability(over), direction)
+  assert.ok(rec)
+  upsertAvailability(db, rec, '2026-08-15T12:00:00Z')
+}
+
+function seededDb(): Db {
+  const db = openDb(':memory:')
+  seed(db, { id: 'a1', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2026-11-05', jMileageCost: 62_500 }, 'outbound')
+  seed(db, { id: 'a2', source: 'qatar', origin: 'ORD', destination: 'HND', date: '2026-11-06', jMileageCost: 85_000, jDirect: false }, 'outbound')
+  seed(db, { id: 'a3', source: 'aeroplan', origin: 'LAX', destination: 'NRT', date: '2026-11-07', jMileageCost: 150_000 }, 'outbound')
+  seed(
+    db,
+    { id: 'p1', source: 'american', origin: 'LAX', destination: 'HND', date: '2026-11-08', distance: 5476, jDirect: true, jAirlines: 'JL', jDirectAirlines: 'JL' },
+    'outbound',
+  )
+  seed(db, { id: 'r1', source: 'aeroplan', origin: 'NRT', destination: 'YYZ', date: '2026-11-16', jMileageCost: 70_000 }, 'return')
+  return db
+}
 
 const NOW = new Date('2026-08-15T12:00:00Z')
 
@@ -138,6 +177,81 @@ test('POST /api/run starts a cycle; concurrent request gets 409', async () => {
   assert.equal(third.status, 202)
   assert.equal(runs, 2)
   scheduler.stop()
+})
+
+test('GET /api/deals/oneway applies config thresholds and filters', async () => {
+  const app = makeApp(seededDb(), null)
+
+  const all = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  // a1 (62.5k out), r1 (70k return), p1 (77,250 est), a2 (85k). a3 is over 90k.
+  assert.equal(all.total, 4)
+  assert.equal(all.deals[0]?.points, 62_500) // sorted by points
+
+  const outboundOnly = (await (
+    await app.request('/api/deals/oneway?direction=outbound')
+  ).json()) as OneWayDealsResponse
+  assert.equal(outboundOnly.total, 3)
+
+  const noEstimates = (await (
+    await app.request('/api/deals/oneway?includeEstimates=false')
+  ).json()) as OneWayDealsResponse
+  assert.equal(noEstimates.total, 3)
+
+  const tighter = (await (
+    await app.request('/api/deals/oneway?maxPoints=70000')
+  ).json()) as OneWayDealsResponse
+  assert.equal(tighter.total, 1)
+
+  const explore = (await (
+    await app.request('/api/deals/oneway?maxPoints=200000&origin=LAX')
+  ).json()) as OneWayDealsResponse
+  assert.equal(explore.total, 2) // a3 (150k) + p1 estimate
+
+  const direct = (await (
+    await app.request('/api/deals/oneway?directOnly=true')
+  ).json()) as OneWayDealsResponse
+  assert.ok(direct.deals.every((d) => d.direct))
+})
+
+test('GET /api/deals/roundtrip pairs from the snapshot with overrides', async () => {
+  const app = makeApp(seededDb(), null)
+  const body = (await (await app.request('/api/deals/roundtrip')).json()) as RoundtripDealsResponse
+  assert.ok(body.total >= 1)
+  const best = body.pairs[0]!
+  assert.equal(best.totalPoints, 62_500 + 70_000)
+  assert.equal(best.outbound.origin, 'YYZ')
+
+  const shortStay = (await (
+    await app.request('/api/deals/roundtrip?minStay=1&maxStay=2')
+  ).json()) as RoundtripDealsResponse
+  assert.equal(shortStay.total, 0) // no returns 1-2 nights after any outbound
+})
+
+test('GET /api/availability/calendar returns per-date minima', async () => {
+  const app = makeApp(seededDb(), null)
+  const body = (await (
+    await app.request('/api/availability/calendar?direction=outbound')
+  ).json()) as CalendarResponse
+  assert.equal(body.days.length, 4)
+  const nov5 = body.days.find((d) => d.date === '2026-11-05')
+  assert.equal(nov5?.minPoints, 62_500)
+  assert.equal(nov5?.cheapestSource, 'aeroplan')
+  const nov8 = body.days.find((d) => d.date === '2026-11-08')
+  assert.equal(nov8?.minPoints, 77_250)
+  assert.equal(nov8?.minPointsIsEstimate, true)
+})
+
+test('GET /api/alerts returns parsed detail JSON', async () => {
+  const db = seededDb()
+  recordAlertedDeals(
+    db,
+    [{ key: 'OW|aeroplan|YYZ|NRT|2026-11-05', kind: 'oneway', points: 62_500, isEstimate: false, detailJson: '{"route":"YYZ→NRT"}' }],
+    '2026-08-15T12:00:00Z',
+  )
+  const app = makeApp(db, null)
+  const body = (await (await app.request('/api/alerts')).json()) as AlertsResponse
+  assert.equal(body.alerts.length, 1)
+  assert.deepEqual(body.alerts[0]?.detail, { route: 'YYZ→NRT' })
 })
 
 test('scheduler computes drift-corrected next run from last cycle time', () => {
