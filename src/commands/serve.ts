@@ -22,9 +22,13 @@ export async function serveCommand(g: GlobalOpts): Promise<void> {
   // Mutable ref: PUT /api/config hot-swaps this without a restart (Phase 4).
   const configRef = { current: loadConfig(g.config), path: g.config }
 
+  // Without SMTP, cycles run in dry-run mode: the UI still gets fresh data, but no
+  // alert state is recorded — so nothing is silently "already alerted" once email
+  // is configured later.
+  const alertsEnabled = Boolean(secrets.smtpPassword)
   let notifier: Notifier = nullNotifier
-  if (secrets.smtpPassword) {
-    notifier = new EmailNotifier(configRef.current, secrets.smtpPassword)
+  if (alertsEnabled) {
+    notifier = new EmailNotifier(configRef.current, secrets.smtpPassword!)
   } else {
     log.warn('SMTP_PASSWORD not set — deals will be detected and shown in the UI but NOT emailed')
   }
@@ -41,7 +45,7 @@ export async function serveCommand(g: GlobalOpts): Promise<void> {
             new SeatsAeroClient({ baseUrl: configRef.current.api.baseUrl, apiKey, onCall }),
           notifier,
         },
-        { trigger },
+        { trigger, dryRun: !alertsEnabled },
       ),
     getIntervalHours: () => configRef.current.poll.intervalHours,
     getLastCycleAt: () => metaGet(db, 'last_cycle_at'),
