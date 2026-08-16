@@ -1,0 +1,79 @@
+# flight-deal-finder configuration
+# Copy to config.yaml and edit. Every key is optional — omitted keys use the defaults shown.
+# Secrets (API key, SMTP password) do NOT live here; they come from .env (see .env.example).
+
+api:
+  # Override to point at a mock server in tests.
+  baseUrl: "https://seats.aero/partnerapi"
+  # Self-imposed cap below the API's hard 1,000 calls/day limit (resets midnight UTC).
+  dailyCallBudget: 900
+  # When estimated remaining calls drop below this, optional /trips detail lookups are skipped.
+  reserveCalls: 50
+
+search:
+  # Cities to fly from (and return to). 3-letter IATA codes.
+  origins: [YYZ, ORD, YVR, LAX]
+  # Tokyo airports.
+  destinations: [NRT, HND]
+  window:
+    # Search window relative to "today", in days.
+    startOffsetDays: 0
+    # Hard-capped at 355 (award calendars only open ~330-360 days out).
+    endOffsetDays: 355
+  # seats.aero source ids queried directly (their mileage cost is what you'd pay).
+  sources: [aeroplan, flyingblue, qatar]
+  # Oneworld proxy: american/alaska records surface JAL/AA space that is bookable
+  # with BA or Qatar Avios; prices are ESTIMATED from a static Avios chart.
+  proxySources:
+    enabled: true
+    sources: [american, alaska]
+  # true = only alert on nonstop awards. Direct deals are flagged either way.
+  directOnly: false
+  # Minimum remaining award seats (sources that omit seat counts always pass).
+  minSeats: 1
+
+thresholds:
+  # Strict less-than, in points.
+  onewayMaxPoints: 90000
+  # Total for an outbound+return pairing; one leg may exceed the one-way cap.
+  roundtripMaxPoints: 180000
+
+roundtrip:
+  # Stay length window used when pairing outbounds with returns.
+  minStayNights: 3
+  maxStayNights: 21
+  # true = only pair returns that land back in the outbound's departure city.
+  sameCityReturn: false
+
+alerts:
+  # digest = at most one email per poll cycle.
+  mode: digest
+  # Re-notify a known deal only if its price drops at least this % below the best price ever alerted...
+  realertDropPct: 15
+  # ...or if it reappears after being gone at least this many days.
+  realertGoneDays: 7
+  maxOnewaysPerEmail: 20
+  maxRoundtripsPerEmail: 10
+  # Cap on per-deal /trips detail lookups (flight numbers, taxes, booking links) per cycle.
+  maxTripLookupsPerCycle: 25
+
+poll:
+  # Hours between cycles. seats.aero refreshes each program only a few times a day,
+  # so values below ~1 waste quota without finding more deals.
+  intervalHours: 2
+
+email:
+  from: "Flight Deal Finder <ianha0@gmail.com>"
+  to: [ianha0@gmail.com]
+  smtp:
+    host: smtp.gmail.com
+    port: 465
+    secure: true
+    user: ianha0@gmail.com
+    # password comes from SMTP_PASSWORD in .env (Gmail app password)
+
+# Read-only in the web UI; changing them requires a manual edit + restart.
+db:
+  path: "./data/deals.db"
+server:
+  port: 8787

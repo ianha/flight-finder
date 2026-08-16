@@ -1,0 +1,173 @@
+import { test, after } from 'node:test'
+import assert from 'node:assert/strict'
+import { openDb, getAlertedDeal, getRecentCycles, countAvailability, type Db } from '../src/db.js'
+import { parseConfig } from '../src/config.js'
+import { SeatsAeroClient } from '../src/seatsAero.js'
+import { runCycle } from '../src/poll.js'
+import type { DealDigest, Notifier } from '../src/notify/notifier.js'
+import { renderText, subjectFor } from '../src/notify/email.js'
+import { startMockServer, type MockServer } from './mockServer.js'
+import { makeAvailability, searchPage } from './helpers/fixtures.js'
+
+const openServers: MockServer[] = []
+after(async () => {
+  await Promise.all(openServers.map((s) => s.close()))
+})
+
+const OUTBOUND_KEY = 'YYZ,ORD,YVR,LAX'
+const RETURN_KEY = 'NRT,HND'
+
+function fixtureServerOptions() {
+  return {
+    searchPagesByOrigin: {
+      [OUTBOUND_KEY]: [
+        searchPage([
+          // Qualifying one-way: Aeroplan YYZ->NRT 62.5k nonstop ANA.
+          makeAvailability({ id: 'ob-1', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2026-11-05', jMileageCost: 62_500, jAirlines: 'NH', jDirectAirlines: 'NH' }),
+          // Above one-way cap but pairable: Qatar ORD->NRT 96k.
+          makeAvailability({ id: 'ob-2', source: 'qatar', origin: 'ORD', destination: 'NRT', date: '2026-11-05', jMileageCost: 96_000, jDirect: false, jAirlines: 'QR' }),
+          // Too expensive for anything: 200k.
+          makeAvailability({ id: 'ob-3', source: 'aeroplan', origin: 'LAX', destination: 'HND', date: '2026-11-06', jMileageCost: 200_000 }),
+        ]),
+      ],
+      [RETURN_KEY]: [
+        searchPage([
+          // Qualifying return: 70k -> pairs with ob-1 (11 nights, 132.5k total).
+          makeAvailability({ id: 'rt-1', source: 'aeroplan', origin: 'NRT', destination: 'YYZ', date: '2026-11-16', jMileageCost: 70_000, jAirlines: 'AC', jDirectAirlines: 'AC' }),
+        ]),
+      ],
+    },
+    trips: {
+      'ob-1': {
+        data: [
+          {
+            ID: 'trip-1',
+            AvailabilityID: 'ob-1',
+            MileageCost: '62500',
+            TotalTaxes: 11200,
+            TaxesCurrency: 'CAD',
+            FlightNumbers: 'NH116',
+            DepartsAt: '2026-11-05T17:15:00Z',
+            ArrivesAt: '2026-11-06T19:50:00Z',
+            Stops: 0,
+            Carriers: 'ANA',
+            Cabin: 'business',
+          },
+        ],
+        booking_links: [{ label: 'Book on Aeroplan', link: 'https://www.aircanada.com/aeroplan', primary: true }],
+      },
+    },
+  }
+}
+
+class CaptureNotifier implements Notifier {
+  digests: DealDigest[] = []
+  failNext = false
+  async sendDigest(digest: DealDigest): Promise<void> {
+    if (this.failNext) {
+      this.failNext = false
+      throw new Error('SMTP down (simulated)')
+    }
+    this.digests.push(digest)
+  }
+}
+
+function deps(db: Db, url: string, notifier: Notifier) {
+  const cfg = parseConfig({ api: { baseUrl: url } })
+  return {
+    db,
+    cfg,
+    clientFactory: (onCall: (endpoint: 'search' | 'trips' | 'routes', remaining: number | null) => void) =>
+      new SeatsAeroClient({ baseUrl: url, apiKey: 'pro_test', onCall, backoffBaseMs: 1, quotaRetryMs: 5 }),
+    notifier,
+    now: () => new Date('2026-08-15T12:00:00Z'),
+  }
+}
+
+test('full cycle: fetch -> detect -> alert once -> silent second cycle', async () => {
+  const server = await startMockServer(fixtureServerOptions())
+  openServers.push(server)
+  const db = openDb(':memory:')
+  const notifier = new CaptureNotifier()
+
+  const outcome = await runCycle(deps(db, server.url, notifier), { trigger: 'manual' })
+  assert.equal(outcome.status, 'ok')
+  assert.equal(outcome.recordsFetched, 4)
+  assert.equal(countAvailability(db), 4)
+  assert.equal(outcome.onewaysFound, 2) // ob-1 (62.5k) and rt-1 (70k)
+  assert.ok(outcome.roundtripsFound >= 1)
+  assert.equal(outcome.alertsSent, outcome.onewaysFound + outcome.roundtripsFound)
+  assert.equal(notifier.digests.length, 1)
+
+  // Digest content sanity.
+  const digest = notifier.digests[0]!
+  const text = renderText(digest)
+  assert.match(subjectFor(digest), /one-ways from 62.5k/)
+  assert.match(text, /YYZ → NRT/)
+  assert.match(text, /Aeroplan/)
+  assert.match(text, /62,500/)
+  assert.match(text, /NH116/) // trips enrichment made it in
+  assert.match(text, /Book on Aeroplan|aircanada/i)
+  assert.match(text, /TOTAL 132,500 pts · 11 nights/)
+  assert.match(text, /seats\.aero/) // attribution
+
+  // Alert state recorded.
+  assert.ok(getAlertedDeal(db, 'OW|aeroplan|YYZ|NRT|2026-11-05'))
+
+  // Second cycle: nothing new — no email.
+  const second = await runCycle(deps(db, server.url, notifier), { trigger: 'manual' })
+  assert.equal(second.status, 'ok')
+  assert.equal(second.alertsSent, 0)
+  assert.equal(notifier.digests.length, 1)
+
+  const cycles = getRecentCycles(db, 10)
+  assert.equal(cycles.length, 2)
+  assert.ok(cycles.every((c) => c.status === 'ok'))
+})
+
+test('failed email send leaves alert state untouched (free retry next cycle)', async () => {
+  const server = await startMockServer(fixtureServerOptions())
+  openServers.push(server)
+  const db = openDb(':memory:')
+  const notifier = new CaptureNotifier()
+  notifier.failNext = true
+
+  const first = await runCycle(deps(db, server.url, notifier), { trigger: 'manual' })
+  assert.equal(first.status, 'error')
+  assert.equal(getAlertedDeal(db, 'OW|aeroplan|YYZ|NRT|2026-11-05'), undefined)
+
+  // Next cycle re-detects and sends successfully.
+  const second = await runCycle(deps(db, server.url, notifier), { trigger: 'manual' })
+  assert.equal(second.status, 'ok')
+  assert.ok(second.alertsSent > 0)
+  assert.equal(notifier.digests.length, 1)
+  assert.ok(getAlertedDeal(db, 'OW|aeroplan|YYZ|NRT|2026-11-05'))
+})
+
+test('dry run returns a digest but writes no alert state and sends nothing', async () => {
+  const server = await startMockServer(fixtureServerOptions())
+  openServers.push(server)
+  const db = openDb(':memory:')
+  const notifier = new CaptureNotifier()
+
+  const outcome = await runCycle(deps(db, server.url, notifier), { trigger: 'manual', dryRun: true })
+  assert.equal(outcome.status, 'ok')
+  assert.ok(outcome.digest)
+  assert.equal(notifier.digests.length, 0)
+  assert.equal(getAlertedDeal(db, 'OW|aeroplan|YYZ|NRT|2026-11-05'), undefined)
+  // Dry run also skips /trips enrichment (no quota burned on detail).
+  assert.equal(server.requests.filter((r) => r.endpoint === 'trips').length, 0)
+})
+
+test('cycle aborts before any API call when the budget is exhausted', async () => {
+  const server = await startMockServer(fixtureServerOptions())
+  openServers.push(server)
+  const db = openDb(':memory:')
+  const notifier = new CaptureNotifier()
+  const d = deps(db, server.url, notifier)
+  d.cfg = parseConfig({ api: { baseUrl: server.url, dailyCallBudget: 40, reserveCalls: 50 } })
+
+  const outcome = await runCycle(d, { trigger: 'scheduled' })
+  assert.equal(outcome.status, 'aborted_quota')
+  assert.equal(server.requests.length, 0)
+})

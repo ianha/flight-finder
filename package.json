@@ -1,0 +1,33 @@
+{
+  "name": "flight-deal-finder",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Personal Tokyo business-class award deal watcher. Award availability data provided by seats.aero.",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "deal-finder": "dist/cli.js"
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsx src/cli.ts",
+    "test": "tsx --test test/*.test.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "better-sqlite3": "^13.0.3",
+    "commander": "^15.0.0",
+    "nodemailer": "^9.0.5",
+    "yaml": "^2.9.0",
+    "zod": "^4.4.3"
+  },
+  "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
+    "@types/node": "^26.2.0",
+    "@types/nodemailer": "^8.0.1",
+    "tsx": "^4.23.12",
+    "typescript": "^7.0.2"
+  }
+}
