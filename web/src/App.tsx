@@ -3,10 +3,12 @@ import type { StatusResponse } from '@shared/apiTypes'
 import { Dashboard } from './pages/Dashboard'
 import { Calendar } from './pages/Calendar'
 import { Status } from './pages/Status'
+import { ConfigEditor } from './pages/ConfigEditor'
 
 const TABS = [
   { route: 'deals', label: 'Deals' },
   { route: 'calendar', label: 'Calendar' },
+  { route: 'config', label: 'Config' },
   { route: 'status', label: 'Status' },
 ]
 
@@ -46,7 +48,15 @@ export function App() {
         </div>
       </header>
 
-      {route === 'calendar' ? <Calendar /> : route === 'status' ? <Status status={status} /> : <Dashboard />}
+      {route === 'calendar' ? (
+        <Calendar />
+      ) : route === 'status' ? (
+        <Status status={status} />
+      ) : route === 'config' ? (
+        <ConfigEditor />
+      ) : (
+        <Dashboard />
+      )}
 
       <footer className="attribution">
         <span>

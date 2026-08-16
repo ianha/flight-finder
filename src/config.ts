@@ -1,5 +1,5 @@
-import { readFileSync, existsSync } from 'node:fs'
-import { parse } from 'yaml'
+import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs'
+import { parse, parseDocument, Document } from 'yaml'
 import { z } from 'zod'
 import { configSchema, type AppConfig } from './shared/configSchema.js'
 import { HARD_MAX_WINDOW_DAYS } from './shared/constants.js'
@@ -69,6 +69,39 @@ export function deriveWindow(
     startDate: fmtLocalDate(addDays(today, startOffset)),
     endDate: fmtLocalDate(addDays(today, Math.max(endOffset, startOffset))),
   }
+}
+
+function isPlainObject(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+function setDeep(doc: Document, prefix: (string | number)[], value: unknown): void {
+  if (isPlainObject(value)) {
+    for (const [k, v] of Object.entries(value)) setDeep(doc, [...prefix, k], v)
+    return
+  }
+  // Scalars and arrays are set wholesale; setting the value of an existing key
+  // keeps the key's attached comments.
+  doc.setIn(prefix, value)
+}
+
+/**
+ * Persist a validated config to YAML, preserving hand-written comments: the
+ * existing file is parsed as a Document and only leaf values are set, then the
+ * result is written atomically (tmp + rename).
+ */
+export function writeConfig(path: string, cfg: AppConfig): void {
+  let doc: Document
+  if (existsSync(path)) {
+    doc = parseDocument(readFileSync(path, 'utf8'))
+    if (doc.errors.length > 0) doc = new Document({})
+  } else {
+    doc = new Document({})
+  }
+  setDeep(doc, [], cfg)
+  const tmp = `${path}.tmp`
+  writeFileSync(tmp, doc.toString())
+  renameSync(tmp, path)
 }
 
 /** Minimal .env loader (KEY=VALUE lines); existing env vars win. Avoids a dotenv dep. */

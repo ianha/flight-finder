@@ -1,6 +1,6 @@
 import { serve } from '@hono/node-server'
 import type { GlobalOpts } from '../cli.js'
-import { loadConfig, readEnvSecrets } from '../config.js'
+import { loadConfig, parseConfig, writeConfig, readEnvSecrets } from '../config.js'
 import { openDb, metaGet } from '../db.js'
 import { SeatsAeroClient } from '../seatsAero.js'
 import { runCycle } from '../poll.js'
@@ -55,6 +55,16 @@ export async function serveCommand(g: GlobalOpts): Promise<void> {
     db,
     getConfig: () => configRef.current,
     scheduler,
+    configApi: {
+      path: configRef.path,
+      apply: (raw) => {
+        const parsed = parseConfig(raw) // throws ConfigError with field issues
+        writeConfig(configRef.path, parsed) // comment-preserving, atomic
+        configRef.current = parsed // hot-swap: next cycle uses the new values
+        log.info('configuration updated via web UI')
+        return parsed
+      },
+    },
     envPresence: () => ({
       seatsAeroApiKey: Boolean(secrets.seatsAeroApiKey),
       smtpPassword: Boolean(secrets.smtpPassword),

@@ -1,6 +1,7 @@
 // Request/response DTOs for the local web API.
 // Shared between the Node server and the web frontend — keep free of Node imports.
 import type { AviosEstimate } from '../types.js'
+import type { AppConfig } from './configSchema.js'
 
 export interface ApiIssue {
   path: string
@@ -140,3 +141,20 @@ export interface AlertDto {
 export interface AlertsResponse {
   alerts: AlertDto[]
 }
+
+// --- config (Phase 4) ---
+
+export interface ConfigResponse {
+  config: AppConfig
+  meta: {
+    path: string
+    /** Fields visible in the UI but not editable through it. */
+    readOnlyPaths: string[]
+  }
+}
+
+export interface ConfigPutResponse {
+  config: AppConfig
+  appliesAt: 'next-cycle'
+}
+

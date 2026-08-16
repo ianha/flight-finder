@@ -1,6 +1,7 @@
 import { Hono } from 'hono'
 import type { Db } from '../db.js'
 import type { AppConfig } from '../shared/configSchema.js'
+import { ConfigError } from '../config.js'
 import type {
   HealthResponse,
   RunConflictResponse,
@@ -28,14 +29,24 @@ export interface SchedulerFacade {
   rearm(): void
 }
 
+export interface ConfigFacade {
+  path: string
+  /** Validate + persist + hot-swap. Throws ConfigError on invalid input. */
+  apply(raw: unknown): AppConfig
+}
+
 export interface AppDeps {
   db: Db
   getConfig: () => AppConfig
   scheduler: SchedulerFacade | null
+  /** Present in serve mode; enables GET/PUT /api/config. */
+  configApi?: ConfigFacade
   envPresence: () => { seatsAeroApiKey: boolean; smtpPassword: boolean }
   version: string
   now?: () => Date
 }
+
+const READ_ONLY_PATHS = ['db.path', 'server.port'] as const
 
 export function buildApp(deps: AppDeps): Hono {
   const now = deps.now ?? (() => new Date())
@@ -118,6 +129,50 @@ export function buildApp(deps: AppDeps): Hono {
     })
   })
 
+  app.get('/api/config', (c) => {
+    if (!deps.configApi) return c.json({ error: 'config API available in serve mode only' }, 400)
+    return c.json({
+      config: deps.getConfig(),
+      meta: { path: deps.configApi.path, readOnlyPaths: [...READ_ONLY_PATHS] },
+    })
+  })
+
+  app.put('/api/config', async (c) => {
+    if (!deps.configApi) return c.json({ error: 'config API available in serve mode only' }, 400)
+    let raw: unknown
+    try {
+      raw = await c.req.json()
+    } catch {
+      return c.json({ error: 'body must be JSON' }, 400)
+    }
+
+    // Read-only fields may be present but must match the current values.
+    const current = deps.getConfig()
+    const issues: { path: string; message: string }[] = []
+    if (isRecord(raw)) {
+      const db = isRecord(raw.db) ? raw.db : undefined
+      if (db && db.path !== undefined && db.path !== current.db.path) {
+        issues.push({ path: 'db.path', message: 'read-only — edit config.yaml and restart' })
+      }
+      const server = isRecord(raw.server) ? raw.server : undefined
+      if (server && server.port !== undefined && server.port !== current.server.port) {
+        issues.push({ path: 'server.port', message: 'read-only — edit config.yaml and restart' })
+      }
+    }
+    if (issues.length > 0) return c.json({ error: 'validation', issues }, 400)
+
+    try {
+      const applied = deps.configApi.apply(raw)
+      deps.scheduler?.rearm()
+      return c.json({ config: applied, appliesAt: 'next-cycle' })
+    } catch (err) {
+      if (err instanceof ConfigError) {
+        return c.json({ error: 'validation', issues: err.issues }, 400)
+      }
+      throw err
+    }
+  })
+
   app.post('/api/run', (c) => {
     if (!deps.scheduler) {
       return c.json({ error: 'scheduler not running (serve mode only)' }, 400)
@@ -178,4 +233,8 @@ function parseBool(raw: string | undefined): boolean | undefined {
 
 function parseDirection(raw: string | undefined): Direction | undefined {
   return raw === 'outbound' || raw === 'return' ? raw : undefined
+}
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v)
 }
