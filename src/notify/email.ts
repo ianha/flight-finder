@@ -252,32 +252,51 @@ export function renderHtml(digest: DealDigest): string {
 // ---------------------------------------------------------------------------
 
 export class EmailNotifier implements Notifier {
-  private readonly transporter: Transporter
+  private readonly getCfg: () => AppConfig
   private readonly retryDelayMs: number
+  private readonly injectedTransporter: Transporter | undefined
+  private cachedTransporter: { key: string; transporter: Transporter } | null = null
 
+  /**
+   * Accepts a config getter so web-console config edits (from/to/SMTP settings)
+   * apply to the very next send without a restart.
+   */
   constructor(
-    private readonly cfg: AppConfig,
-    smtpPassword: string,
+    cfg: AppConfig | (() => AppConfig),
+    private readonly smtpPassword: string,
     opts: { retryDelayMs?: number; transporter?: Transporter } = {},
   ) {
+    this.getCfg = typeof cfg === 'function' ? cfg : () => cfg
     this.retryDelayMs = opts.retryDelayMs ?? 30_000
-    this.transporter =
-      opts.transporter ??
-      createTransport({
-        host: cfg.email.smtp.host,
-        port: cfg.email.smtp.port,
-        secure: cfg.email.smtp.secure,
-        auth: { user: cfg.email.smtp.user, pass: smtpPassword },
-      })
+    this.injectedTransporter = opts.transporter
+  }
+
+  private transporterFor(cfg: AppConfig): Transporter {
+    if (this.injectedTransporter) return this.injectedTransporter
+    const smtp = cfg.email.smtp
+    const key = `${smtp.host}|${smtp.port}|${smtp.secure}|${smtp.user}`
+    if (this.cachedTransporter?.key !== key) {
+      this.cachedTransporter = {
+        key,
+        transporter: createTransport({
+          host: smtp.host,
+          port: smtp.port,
+          secure: smtp.secure,
+          auth: { user: smtp.user, pass: this.smtpPassword },
+        }),
+      }
+    }
+    return this.cachedTransporter.transporter
   }
 
   private async sendWithRetry(subject: string, text: string, html?: string): Promise<void> {
     let lastErr: unknown
     for (let attempt = 1; attempt <= 3; attempt++) {
+      const cfg = this.getCfg()
       try {
-        await this.transporter.sendMail({
-          from: this.cfg.email.from,
-          to: this.cfg.email.to.join(', '),
+        await this.transporterFor(cfg).sendMail({
+          from: cfg.email.from,
+          to: cfg.email.to.join(', '),
           subject,
           text,
           ...(html ? { html } : {}),

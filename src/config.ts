@@ -80,8 +80,18 @@ function setDeep(doc: Document, prefix: (string | number)[], value: unknown): vo
     for (const [k, v] of Object.entries(value)) setDeep(doc, [...prefix, k], v)
     return
   }
-  // Scalars and arrays are set wholesale; setting the value of an existing key
-  // keeps the key's attached comments.
+  // Replacing a sequence node drops comments attached to its items, so leave
+  // arrays untouched when the value hasn't actually changed.
+  if (Array.isArray(value)) {
+    const existing = doc.getIn(prefix, true)
+    const existingJson =
+      existing && typeof (existing as { toJSON?: () => unknown }).toJSON === 'function'
+        ? (existing as { toJSON: () => unknown }).toJSON()
+        : undefined
+    if (JSON.stringify(existingJson) === JSON.stringify(value)) return
+  }
+  // Scalars and changed arrays are set wholesale; setting the value of an
+  // existing key keeps the key's attached comments.
   doc.setIn(prefix, value)
 }
 

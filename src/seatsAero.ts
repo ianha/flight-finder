@@ -56,8 +56,10 @@ export interface SearchParams {
 
 export interface SearchResult {
   records: AvailabilityRecord[]
-  /** True when pagination stopped early (quota exhausted mid-flight). */
+  /** True when pagination stopped early because the API quota ran out. */
   truncated: boolean
+  /** True when the MAX_PAGES safety stop fired (not a quota condition). */
+  pageCapped: boolean
   invalidCount: number
   pages: number
 }
@@ -169,7 +171,7 @@ export class SeatsAeroClient {
       } catch (err) {
         if (err instanceof QuotaExhaustedError && pages > 0) {
           log.warn('quota exhausted mid-pagination — continuing with partial results')
-          return { records, truncated: true, invalidCount, pages }
+          return { records, truncated: true, pageCapped: false, invalidCount, pages }
         }
         throw err
       }
@@ -191,7 +193,9 @@ export class SeatsAeroClient {
       skip += page.data.data.length
       if (page.data.cursor !== undefined && cursor === undefined) cursor = page.data.cursor
       if (!page.data.hasMore || page.data.data.length === 0 || pages >= MAX_PAGES) {
-        return { records, truncated: pages >= MAX_PAGES, invalidCount, pages }
+        const pageCapped = page.data.hasMore === true && pages >= MAX_PAGES
+        if (pageCapped) log.warn(`search stopped at the ${MAX_PAGES}-page safety cap with more data available`)
+        return { records, truncated: false, pageCapped, invalidCount, pages }
       }
     }
   }

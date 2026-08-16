@@ -161,8 +161,14 @@ export function buildApp(deps: AppDeps): Hono {
     }
     if (issues.length > 0) return c.json({ error: 'validation', issues }, 400)
 
+    // Pin read-only sections to their current values so a body that omits them
+    // cannot silently rewrite config.yaml with schema defaults.
+    const pinned = isRecord(raw)
+      ? { ...raw, db: { path: current.db.path }, server: { port: current.server.port } }
+      : raw
+
     try {
-      const applied = deps.configApi.apply(raw)
+      const applied = deps.configApi.apply(pinned)
       deps.scheduler?.rearm()
       return c.json({ config: applied, appliesAt: 'next-cycle' })
     } catch (err) {

@@ -1,9 +1,14 @@
 import type { AppConfig } from '../shared/configSchema.js'
 import type { AvailabilityRecord, DealLeg, RoundtripDeal } from '../types.js'
-import { candidateLeg, onewayKey } from './oneway.js'
+import { candidateLeg } from './oneway.js'
 
 export function roundtripKey(outbound: DealLeg, inbound: DealLeg): string {
-  return `RT|${onewayKey(outbound)}|${onewayKey(inbound)}`
+  // Keyed by the TRIP (cities + dates), not the specific program pairing: when a
+  // different source becomes the cheapest way to fly the same trip, that is the
+  // same deal — the >=15% improvement rule decides whether it re-alerts. Pinning
+  // the key to sources would re-alert on every pairing flicker and freeze the
+  // gone-clock of keys that stop winning.
+  return `RT|${outbound.origin}|${outbound.date}|${inbound.destination}|${inbound.date}`
 }
 
 function dateToEpochDay(date: string): number {

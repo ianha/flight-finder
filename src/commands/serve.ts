@@ -28,7 +28,8 @@ export async function serveCommand(g: GlobalOpts): Promise<void> {
   const alertsEnabled = Boolean(secrets.smtpPassword)
   let notifier: Notifier = nullNotifier
   if (alertsEnabled) {
-    notifier = new EmailNotifier(configRef.current, secrets.smtpPassword!)
+    // Config getter, not snapshot: web-console edits reach the next send.
+    notifier = new EmailNotifier(() => configRef.current, secrets.smtpPassword!)
   } else {
     log.warn('SMTP_PASSWORD not set — deals will be detected and shown in the UI but NOT emailed')
   }

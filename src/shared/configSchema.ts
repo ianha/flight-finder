@@ -1,7 +1,7 @@
 // The single source of truth for configuration shape and defaults.
 // Shared between the Node service and the web frontend — keep free of Node imports.
 import { z } from 'zod'
-import { HARD_MAX_WINDOW_DAYS } from './constants.js'
+import { HARD_MAX_WINDOW_DAYS, PROXY_PRICED_SOURCES } from './constants.js'
 
 const airportCode = z
   .string()
@@ -102,6 +102,19 @@ export const configSchema = z
     message: 'roundtripMaxPoints must be >= onewayMaxPoints',
     path: ['thresholds', 'roundtripMaxPoints'],
   })
+  .refine(
+    (c) =>
+      !c.search.sources.some(
+        (s) =>
+          c.search.proxySources.sources.includes(s) ||
+          (PROXY_PRICED_SOURCES as readonly string[]).includes(s),
+      ),
+    {
+      message:
+        'proxy-priced sources (american/alaska) must not appear in search.sources — their records are priced via estimated Avios, never their own mileage cost',
+      path: ['search', 'sources'],
+    },
+  )
 
 export type AppConfig = z.output<typeof configSchema>
 export type AppConfigInput = z.input<typeof configSchema>

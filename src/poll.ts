@@ -11,6 +11,9 @@ import {
   recordAlertedDeals,
   touchAlertedDealsSeen,
   countConsecutiveFailedCycles,
+  acquireCycleLock,
+  releaseCycleLock,
+  reconcileStuckCycles,
   utcDay,
   type Db,
   type CycleTrigger,
@@ -69,6 +72,44 @@ export async function runCycle(deps: CycleDeps, opts: CycleOptions): Promise<Cyc
   const startedAt = now().toISOString()
   const dryRun = opts.dryRun ?? false
 
+  // One cycle at a time across processes (CLI `search` vs the serve scheduler):
+  // concurrent cycles would double-alert and interleave snapshots.
+  if (!acquireCycleLock(db, now())) {
+    const msg = 'another deal-finder cycle is already running against this database'
+    log.warn(msg)
+    return {
+      status: 'error',
+      digest: null,
+      recordsFetched: 0,
+      invalidCount: 0,
+      onewaysFound: 0,
+      roundtripsFound: 0,
+      alertsSent: 0,
+      callsUsed: 0,
+      error: msg,
+    }
+  }
+  try {
+    // Holding the lock means no other cycle is live — any 'running' rows are
+    // leftovers from a crashed/killed process. Reconcile them now so crash
+    // loops are visible in history and the failure counter.
+    const swept = reconcileStuckCycles(db, now().toISOString())
+    if (swept > 0) log.warn(`marked ${swept} interrupted cycle(s) as errors`)
+    return await runCycleLocked(deps, opts, now, startedAt, dryRun)
+  } finally {
+    releaseCycleLock(db)
+  }
+}
+
+async function runCycleLocked(
+  deps: CycleDeps,
+  opts: CycleOptions,
+  now: () => Date,
+  startedAt: string,
+  dryRun: boolean,
+): Promise<CycleOutcome> {
+  const { db, cfg, notifier } = deps
+
   let callsUsed = 0
   const onCall: OnApiCall = (endpoint, remaining) => {
     callsUsed++
@@ -104,6 +145,10 @@ export async function runCycle(deps: CycleDeps, opts: CycleOptions): Promise<Cyc
       alertsSent: 0,
       errorMessage: 'daily API budget exhausted before cycle start',
     })
+    // The scheduler's drift correction reads last_cycle_at — without this write,
+    // an aborted cycle would re-arm with ~0 delay and hot-loop all day.
+    metaSet(db, 'last_cycle_at', startedAt)
+    metaSet(db, 'last_cycle_status', 'aborted_quota')
     log.warn('cycle skipped: daily API budget exhausted')
     return {
       status: 'aborted_quota',
@@ -187,6 +232,9 @@ export async function runCycle(deps: CycleDeps, opts: CycleOptions): Promise<Cyc
         recordsFetched += result.records.length
         invalidCount += result.invalidCount
         if (result.truncated) quotaTruncated = true
+        if (result.pageCapped) {
+          notes.push('Result set hit the pagination safety cap — very distant dates may be missing.')
+        }
         for (const rec of result.records) upsertAvailability(db, rec, seenAt)
       }
     })()
@@ -207,8 +255,12 @@ export async function runCycle(deps: CycleDeps, opts: CycleOptions): Promise<Cyc
       cfg,
       now(),
     )
-    if (!dryRun && stillQualifyingKeys.length > 0) {
-      touchAlertedDealsSeen(db, stillQualifyingKeys, now().toISOString())
+    // Refresh the seen-clock for every known deal that still qualifies — including
+    // ones about to be (re-)alerted, so a failed send later cannot make a
+    // continuously-visible deal look "gone" and re-alert as "returned".
+    if (!dryRun) {
+      const seenKeys = [...stillQualifyingKeys, ...toAlert.map((a) => a.deal.key)]
+      if (seenKeys.length > 0) touchAlertedDealsSeen(db, seenKeys, now().toISOString())
     }
 
     const alertOneways = toAlert.filter((a): a is AlertableDeal<OneWayDeal> => a.deal.kind === 'oneway')
@@ -219,10 +271,12 @@ export async function runCycle(deps: CycleDeps, opts: CycleOptions): Promise<Cyc
     // Best-effort flight-level enrichment for the deals we are about to alert.
     const digestOneways: DigestOneway[] = []
     let tripLookups = 0
+    let enrichmentStopped = false
     for (const a of alertOneways.slice(0, cfg.alerts.maxOnewaysPerEmail)) {
       let detail: TripDetail | null = null
       if (
         !dryRun &&
+        !enrichmentStopped &&
         tripLookups < cfg.alerts.maxTripLookupsPerCycle &&
         estimatedRemaining() > cfg.api.reserveCalls
       ) {
@@ -231,6 +285,9 @@ export async function runCycle(deps: CycleDeps, opts: CycleOptions): Promise<Cyc
           detail = await client.getTrips(a.deal.availabilityId)
         } catch (err) {
           if (err instanceof QuotaExhaustedError) {
+            // Stop enriching entirely — every further call would also 429
+            // (after its own long retry wait) and burn nothing but time.
+            enrichmentStopped = true
             quotaTruncated = true
             notes.push('API quota ran out during detail lookups.')
           } else {
@@ -254,18 +311,23 @@ export async function runCycle(deps: CycleDeps, opts: CycleOptions): Promise<Cyc
       notes,
     }
 
-    // Alert + persist (alert state is written only after a successful send).
+    // Alert + persist. Only deals the user actually SAW in the email are recorded
+    // as alerted — overflow beyond the per-email caps stays unrecorded and
+    // resurfaces next cycle (trickling through the caps) instead of being
+    // silently suppressed forever. Alert state is written only after a
+    // successful send.
+    const emailedDeals: AlertableDeal[] = [...digestOneways, ...digestRoundtrips]
     let alertsSent = 0
-    if (toAlert.length > 0 && !dryRun) {
+    if (emailedDeals.length > 0 && !dryRun) {
       await notifier.sendDigest(digest)
-      alertsSent = toAlert.length
+      alertsSent = emailedDeals.length
       recordAlertedDeals(
         db,
-        toAlert.map((a) => ({
+        emailedDeals.map((a) => ({
           key: a.deal.key,
           kind: a.deal.kind,
           points: dealPoints(a.deal),
-          isEstimate: a.deal.kind === 'oneway' ? a.deal.isEstimate : a.deal.isEstimate,
+          isEstimate: a.deal.isEstimate,
           detailJson: JSON.stringify(dealSummary(a)),
         })),
         now().toISOString(),

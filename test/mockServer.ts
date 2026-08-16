@@ -13,6 +13,8 @@ export interface MockServerOptions {
   routes?: Record<string, unknown[]>
   /** Number of leading requests that fail with 500 in flaky500 mode. */
   flakyFailures?: number
+  /** After this many successful requests, every request 429s (mid-flight quota exhaustion). */
+  quotaAfterRequests?: number
 }
 
 export interface RequestLogEntry {
@@ -30,6 +32,7 @@ export interface MockServer {
 export async function startMockServer(opts: MockServerOptions = {}): Promise<MockServer> {
   let mode: MockMode = 'ok'
   let flakyRemaining = opts.flakyFailures ?? 2
+  let served = 0
   let rateLimitRemaining = 900
   const requests: RequestLogEntry[] = []
   const searchCallsByKey = new Map<string, number>()
@@ -61,6 +64,10 @@ export async function startMockServer(opts: MockServerOptions = {}): Promise<Moc
       flakyRemaining--
       return json(503, { error: 'flaky' })
     }
+    if (opts.quotaAfterRequests !== undefined && served >= opts.quotaAfterRequests) {
+      return json(429, {})
+    }
+    served++
 
     if (endpoint === 'search') {
       const originKey = url.searchParams.get('origin_airport') ?? ''

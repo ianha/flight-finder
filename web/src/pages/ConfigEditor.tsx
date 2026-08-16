@@ -96,6 +96,8 @@ export function ConfigEditor() {
   const [issues, setIssues] = useState<Issue[]>([])
   const [toast, setToast] = useState<{ msg: string; err: boolean } | null>(null)
   const [saving, setSaving] = useState(false)
+  // Bumped on Discard/Save so uncontrolled (defaultValue) inputs re-initialize.
+  const [formRev, setFormRev] = useState(0)
 
   useEffect(() => {
     if (remote.data && draft === null) setDraft(structuredClone(remote.data.config))
@@ -149,6 +151,7 @@ export function ConfigEditor() {
       }
       const ok = body as ConfigPutResponse
       setDraft(structuredClone(ok.config))
+      setFormRev((r) => r + 1)
       remote.refetch()
       showToast('saved — applies from the next cycle')
     } catch (e) {
@@ -161,6 +164,7 @@ export function ConfigEditor() {
   const discard = () => {
     setDraft(structuredClone(remote.data!.config))
     setIssues([])
+    setFormRev((r) => r + 1) // remounts the fields so defaultValue inputs reset
   }
 
   const d = draft
@@ -194,12 +198,12 @@ export function ConfigEditor() {
         </div>
       </div>
 
+      <div key={formRev}>
       <Section title="Search">
         <Field label="Home cities" path="search.origins" issues={issues} hint="comma-separated IATA codes">
           <input
             type="text"
             defaultValue={codesToText(d.search.origins)}
-            key={`origins-${remote.data.meta.path}`}
             onBlur={(e) => set((c) => (c.search.origins = textToCodes(e.target.value)))}
           />
         </Field>
@@ -360,6 +364,7 @@ export function ConfigEditor() {
         </Field>
       </Section>
 
+      </div>
       <div style={{ padding: '14px 16px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-faint)' }}>
         Saves preserve the comments in your config.yaml and apply from the next cycle — interval changes re-arm the
         scheduler immediately.

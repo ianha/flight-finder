@@ -87,8 +87,9 @@ function airlinesInclude(list: string, codes: string[]): boolean {
  */
 export function isProxyEligible(rec: AvailabilityRecord): boolean {
   if (!rec.jAvailable || !rec.jDirect) return false
-  const airlines = rec.jDirectAirlines || rec.jAirlines
-  if (!airlinesInclude(airlines, AVIOS_BOOKABLE_CARRIERS)) return false
+  // Strictly the DIRECT itinerary's carriers — falling back to jAirlines could
+  // pass on a JL/AA connection while the actual nonstop is another carrier.
+  if (!airlinesInclude(rec.jDirectAirlines, AVIOS_BOOKABLE_CARRIERS)) return false
   return routeMiles(rec) !== null
 }
 

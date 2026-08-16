@@ -1,5 +1,5 @@
 import { existsSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { dirname, join, relative, isAbsolute } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { serveStatic } from '@hono/node-server/serve-static'
 import type { Hono } from 'hono'
@@ -25,10 +25,9 @@ export function registerStatic(app: Hono): void {
 }
 
 function relativeToCwd(abs: string): string {
-  const cwd = process.cwd()
-  if (abs.startsWith(cwd)) {
-    const rel = abs.slice(cwd.length).replace(/^\/+/, '')
-    return rel === '' ? '.' : `./${rel}`
-  }
-  return abs
+  const rel = relative(process.cwd(), abs)
+  if (rel === '') return '.'
+  // Outside the cwd tree (or a different drive): keep the absolute path.
+  if (rel.startsWith('..') || isAbsolute(rel)) return abs
+  return `./${rel}`
 }

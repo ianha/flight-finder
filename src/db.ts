@@ -346,15 +346,71 @@ export function getRecentCycles(db: Db, limit: number): CycleRow[] {
 }
 
 export function countConsecutiveFailedCycles(db: Db): number {
+  // Only hard 'error' cycles count as failures: an 'aborted_quota' cycle is a
+  // healthy service protecting its budget (and may even have sent a digest).
   const rows = db
     .prepare(`SELECT status FROM cycles WHERE status != 'running' ORDER BY id DESC LIMIT 20`)
     .all() as { status: string }[]
   let n = 0
   for (const row of rows) {
-    if (row.status === 'ok') break
+    if (row.status !== 'error') break
     n++
   }
   return n
+}
+
+/**
+ * Mark cycles left in 'running' by a crashed/killed process as errors.
+ * Called at process start (serve and one-shot search), when no cycle can be live.
+ */
+export function reconcileStuckCycles(db: Db, now: string): number {
+  const info = db
+    .prepare(
+      `UPDATE cycles SET status = 'error', finished_at = ?,
+         error_message = 'interrupted — process exited mid-cycle'
+       WHERE status = 'running'`,
+    )
+    .run(now)
+  return info.changes
+}
+
+// ---------------------------------------------------------------------------
+// Cross-process cycle lock (CLI `search` vs the serve scheduler on one DB)
+// ---------------------------------------------------------------------------
+
+const CYCLE_LOCK_KEY = 'cycle_lock'
+const CYCLE_LOCK_STALE_MS = 30 * 60_000
+
+/** Returns true when acquired; false when another live process holds it. */
+export function acquireCycleLock(db: Db, now: Date): boolean {
+  return db.transaction(() => {
+    const held = metaGet(db, CYCLE_LOCK_KEY)
+    if (held !== undefined) {
+      const [pid, ts] = held.split('|')
+      const age = now.getTime() - Date.parse(ts ?? '')
+      const alive = pid !== undefined && processAlive(parseInt(pid, 10))
+      if (alive && Number.isFinite(age) && age < CYCLE_LOCK_STALE_MS) return false
+    }
+    metaSet(db, CYCLE_LOCK_KEY, `${process.pid}|${now.toISOString()}`)
+    return true
+  })()
+}
+
+export function releaseCycleLock(db: Db): void {
+  const held = metaGet(db, CYCLE_LOCK_KEY)
+  if (held !== undefined && held.startsWith(`${process.pid}|`)) {
+    db.prepare('DELETE FROM meta WHERE key = ?').run(CYCLE_LOCK_KEY)
+  }
+}
+
+function processAlive(pid: number): boolean {
+  if (!Number.isFinite(pid) || pid <= 0) return false
+  try {
+    process.kill(pid, 0)
+    return true
+  } catch {
+    return false
+  }
 }
 
 // ---------------------------------------------------------------------------
