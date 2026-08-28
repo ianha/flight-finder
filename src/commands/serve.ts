@@ -14,10 +14,15 @@ import { log } from '../log.js'
 
 export async function serveCommand(g: GlobalOpts): Promise<void> {
   const secrets = readEnvSecrets()
-  if (!secrets.seatsAeroApiKey) {
-    throw new Error('SEATS_AERO_API_KEY is not set — copy .env.example to .env and fill it in')
-  }
+  // No API key is not fatal: the console still serves existing data and config
+  // editing (UI-only mode) — only the polling scheduler stays off.
   const apiKey = secrets.seatsAeroApiKey
+  if (!apiKey) {
+    log.warn(
+      'SEATS_AERO_API_KEY is not set — running the console WITHOUT polling. ' +
+        'Copy .env.example to .env and fill it in, then restart to enable search cycles.',
+    )
+  }
 
   // Mutable ref: PUT /api/config hot-swaps this without a restart (Phase 4).
   const configRef = { current: loadConfig(g.config), path: g.config }
@@ -46,21 +51,23 @@ export async function serveCommand(g: GlobalOpts): Promise<void> {
 
   const db = openDb(configRef.current.db.path)
 
-  const scheduler = new Scheduler({
-    runner: (trigger) =>
-      runCycle(
-        {
-          db,
-          cfg: configRef.current,
-          clientFactory: (onCall) =>
-            new SeatsAeroClient({ baseUrl: configRef.current.api.baseUrl, apiKey, onCall }),
-          notifier,
-        },
-        { trigger, dryRun: !alertsEnabled() },
-      ),
-    getIntervalHours: () => configRef.current.poll.intervalHours,
-    getLastCycleAt: () => metaGet(db, 'last_cycle_at'),
-  })
+  const scheduler = apiKey
+    ? new Scheduler({
+        runner: (trigger) =>
+          runCycle(
+            {
+              db,
+              cfg: configRef.current,
+              clientFactory: (onCall) =>
+                new SeatsAeroClient({ baseUrl: configRef.current.api.baseUrl, apiKey, onCall }),
+              notifier,
+            },
+            { trigger, dryRun: !alertsEnabled() },
+          ),
+        getIntervalHours: () => configRef.current.poll.intervalHours,
+        getLastCycleAt: () => metaGet(db, 'last_cycle_at'),
+      })
+    : null
 
   const app = buildApp({
     db,
@@ -86,14 +93,18 @@ export async function serveCommand(g: GlobalOpts): Promise<void> {
 
   const port = configRef.current.server.port
   serve({ fetch: app.fetch, port, hostname: '127.0.0.1' })
-  scheduler.start()
+  scheduler?.start()
 
   log.info(`deal-finder console: http://127.0.0.1:${port} (localhost only)`)
-  log.info(`polling every ${configRef.current.poll.intervalHours}h — ${ATTRIBUTION} (${ATTRIBUTION_URL})`)
+  log.info(
+    scheduler
+      ? `polling every ${configRef.current.poll.intervalHours}h — ${ATTRIBUTION} (${ATTRIBUTION_URL})`
+      : `polling disabled (no API key) — ${ATTRIBUTION} (${ATTRIBUTION_URL})`,
+  )
 
   const shutdown = () => {
     log.info('shutting down')
-    scheduler.stop()
+    scheduler?.stop()
     db.close()
     process.exit(0)
   }

@@ -181,7 +181,10 @@ export function buildApp(deps: AppDeps): Hono {
 
   app.post('/api/run', (c) => {
     if (!deps.scheduler) {
-      return c.json({ error: 'scheduler not running (serve mode only)' }, 400)
+      const why = deps.envPresence().seatsAeroApiKey
+        ? 'scheduler not running (serve mode only)'
+        : 'scheduler disabled — SEATS_AERO_API_KEY is not set'
+      return c.json({ error: why }, 400)
     }
     const inFlight = deps.scheduler.cycleInFlight()
     if (inFlight) {

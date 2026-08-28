@@ -83,7 +83,13 @@ function SchedulerCard({
           {inFlight ? `cycle running (${status.cycleInFlight!.trigger})` : 'idle'}
         </dd>
         <dt>interval</dt>
-        <dd>{status.scheduler ? `${status.scheduler.intervalHours}h` : 'not running (CLI mode)'}</dd>
+        <dd>
+          {status.scheduler
+            ? `${status.scheduler.intervalHours}h`
+            : status.env.seatsAeroApiKey
+              ? 'not running (CLI mode)'
+              : 'disabled — no API key'}
+        </dd>
         <dt>next scheduled run</dt>
         <dd>
           {status.scheduler?.nextRunAt ? new Date(status.scheduler.nextRunAt).toLocaleString() : '—'}

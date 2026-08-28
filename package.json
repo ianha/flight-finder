@@ -12,8 +12,10 @@
   },
   "scripts": {
     "build": "tsc -p tsconfig.json && tsc -p web/tsconfig.json && vite build --config web/vite.config.ts",
-    "dev": "tsx src/cli.ts",
+    "dev": "node scripts/dev.mjs",
+    "dev:server": "tsx watch src/cli.ts serve",
     "dev:web": "vite --config web/vite.config.ts",
+    "cli": "tsx src/cli.ts",
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit && tsc -p web/tsconfig.json"
   },

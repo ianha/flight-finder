@@ -119,14 +119,12 @@ npm test
 ```
 
 ```bash
-npm run dev -- search --dry-run
+npm run dev
 ```
 
-```bash
-npm run dev:web
-```
+`npm run dev` starts **both** dev processes — the backend (`serve` under tsx watch, port 8787) and the Vite UI (port 5173, proxying `/api` to 8787) — and stops both together. They are also available separately as `npm run dev:server` and `npm run dev:web` (running only `dev:web` gives proxy ECONNREFUSED errors — the UI has no backend to talk to). One-shot CLI commands in dev: `npm run cli -- search --dry-run`.
 
-The entire pipeline is testable without an API key: `test/mockServer.ts` plays seats.aero (pagination, 400/429/5xx modes), fixtures build realistic records, and 55 tests cover detection boundaries, pairing, dedupe, the HTTP API, and comment-preserving config writes. `npm run dev:web` serves the UI on :5173 proxying `/api` to :8787.
+Without `SEATS_AERO_API_KEY`, `serve` still boots in UI-only mode (console + config editing work; polling stays off and Status shows why). The entire pipeline is testable without an API key: `test/mockServer.ts` plays seats.aero (pagination, 400/429/5xx modes), fixtures build realistic records, and the test suite covers detection boundaries, pairing, dedupe, the HTTP API, and comment-preserving config writes.
 
 ### Manual UI checklist (after `npm run build`, against real or mock data)
 
