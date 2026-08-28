@@ -35,7 +35,7 @@ const MIGRATIONS: string[] = [
   CREATE INDEX ix_avail_direction_date ON availability(direction, date);
   CREATE INDEX ix_avail_last_seen ON availability(last_seen_at);
 
-  -- Everything ever emailed, for dedupe and the re-alert policy.
+  -- Everything ever alerted, for dedupe and the re-alert policy.
   CREATE TABLE alerted_deals (
     deal_key         TEXT PRIMARY KEY,
     kind             TEXT NOT NULL,
@@ -269,7 +269,7 @@ export function recordAlertedDeals(db: Db, deals: AlertUpsert[], now: string): v
   })()
 }
 
-/** Refresh last_seen_at for known deals that still qualify this cycle (even when not re-emailed). */
+/** Refresh last_seen_at for known deals that still qualify this cycle (even when not re-alerted). */
 export function touchAlertedDealsSeen(db: Db, keys: string[], now: string): void {
   const stmt = db.prepare('UPDATE alerted_deals SET last_seen_at = ? WHERE deal_key = ?')
   db.transaction(() => {

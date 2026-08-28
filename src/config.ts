@@ -136,14 +136,24 @@ export function loadDotEnv(path = '.env'): void {
 
 export interface EnvSecrets {
   seatsAeroApiKey: string | undefined
-  smtpPassword: string | undefined
+  twilioAccountSid: string | undefined
+  twilioAuthToken: string | undefined
 }
 
 export function readEnvSecrets(env: NodeJS.ProcessEnv = process.env): EnvSecrets {
   return {
     seatsAeroApiKey: env.SEATS_AERO_API_KEY || undefined,
-    smtpPassword: env.SMTP_PASSWORD || undefined,
+    twilioAccountSid: env.TWILIO_ACCOUNT_SID || undefined,
+    twilioAuthToken: env.TWILIO_AUTH_TOKEN || undefined,
   }
+}
+
+/** Both Twilio credentials present (the account can send SMS). */
+export function twilioCredsPresent(s: EnvSecrets): s is EnvSecrets & {
+  twilioAccountSid: string
+  twilioAuthToken: string
+} {
+  return Boolean(s.twilioAccountSid && s.twilioAuthToken)
 }
 
 export { configSchema, type AppConfig, z }

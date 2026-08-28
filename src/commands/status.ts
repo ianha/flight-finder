@@ -1,5 +1,5 @@
 import type { GlobalOpts } from '../cli.js'
-import { loadConfig, readEnvSecrets } from '../config.js'
+import { loadConfig, readEnvSecrets, twilioCredsPresent } from '../config.js'
 import { openDb, getRecentAlerts } from '../db.js'
 import { buildStatus, recentCycles } from '../server/queries.js'
 import { ATTRIBUTION, ATTRIBUTION_URL } from '../shared/constants.js'
@@ -14,7 +14,7 @@ export async function statusCommand(g: GlobalOpts): Promise<void> {
     null,
     {
       seatsAeroApiKey: Boolean(secrets.seatsAeroApiKey),
-      smtpPassword: Boolean(secrets.smtpPassword),
+      twilioCreds: twilioCredsPresent(secrets),
     },
     new Date(),
   )
@@ -42,7 +42,7 @@ export async function statusCommand(g: GlobalOpts): Promise<void> {
   )
   console.log('— secrets —')
   console.log(
-    `  SEATS_AERO_API_KEY ${status.env.seatsAeroApiKey ? '✓' : '✗'} · SMTP_PASSWORD ${status.env.smtpPassword ? '✓' : '✗'}`,
+    `  SEATS_AERO_API_KEY ${status.env.seatsAeroApiKey ? '✓' : '✗'} · TWILIO creds ${status.env.twilioCreds ? '✓' : '✗'}`,
   )
 
   const cycles = recentCycles(db, 5)

@@ -41,7 +41,7 @@ export interface AppDeps {
   scheduler: SchedulerFacade | null
   /** Present in serve mode; enables GET/PUT /api/config. */
   configApi?: ConfigFacade
-  envPresence: () => { seatsAeroApiKey: boolean; smtpPassword: boolean }
+  envPresence: () => { seatsAeroApiKey: boolean; twilioCreds: boolean }
   version: string
   now?: () => Date
 }

@@ -1,6 +1,6 @@
 # flight-deal-finder configuration
 # Copy to config.yaml and edit. Every key is optional — omitted keys use the defaults shown.
-# Secrets (API key, SMTP password) do NOT live here; they come from .env (see .env.example).
+# Secrets (API key, Twilio credentials) do NOT live here; they come from .env (see .env.example).
 
 api:
   # Override to point at a mock server in tests.
@@ -46,14 +46,15 @@ roundtrip:
   sameCityReturn: false
 
 alerts:
-  # digest = at most one email per poll cycle.
+  # digest = at most one SMS per poll cycle.
   mode: digest
   # Re-notify a known deal only if its price drops at least this % below the best price ever alerted...
   realertDropPct: 15
   # ...or if it reappears after being gone at least this many days.
   realertGoneDays: 7
-  maxOnewaysPerEmail: 20
-  maxRoundtripsPerEmail: 10
+  # Deals beyond these caps are summarized as "+N more" and re-surface next cycle.
+  maxOnewaysPerAlert: 8
+  maxRoundtripsPerAlert: 4
   # Cap on per-deal /trips detail lookups (flight numbers, taxes, booking links) per cycle.
   maxTripLookupsPerCycle: 25
 
@@ -62,15 +63,15 @@ poll:
   # so values below ~1 waste quota without finding more deals.
   intervalHours: 2
 
-email:
-  from: "Flight Deal Finder <ianha0@gmail.com>"
-  to: [ianha0@gmail.com]
-  smtp:
-    host: smtp.gmail.com
-    port: 465
-    secure: true
-    user: ianha0@gmail.com
-    # password comes from SMTP_PASSWORD in .env (Gmail app password)
+sms:
+  # Where deal texts go: one or more E.164 numbers, QUOTED — YAML reads an
+  # unquoted +14165551234 as a number (e.g. to: ["+14165551234"]).
+  to: []
+  # Your Twilio phone number (E.164). Credentials come from TWILIO_ACCOUNT_SID /
+  # TWILIO_AUTH_TOKEN in .env. Empty to/from = SMS disabled (console still works).
+  from: ""
+  # Long digests are truncated ("+N more") to stay within this many billed segments.
+  maxSegments: 3
 
 # Read-only in the web UI; changing them requires a manual edit + restart.
 db:

@@ -66,7 +66,7 @@ function makeApp(db: Db, scheduler: SchedulerFacade | null) {
     db,
     getConfig: () => parseConfig({}),
     scheduler,
-    envPresence: () => ({ seatsAeroApiKey: true, smtpPassword: false }),
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: false }),
     version: 'test',
     now: () => NOW,
   })
@@ -108,7 +108,7 @@ test('GET /api/status reports quota math, last cycle, and env presence', async (
   assert.equal(body.lastCycle?.durationMs, 42_000)
   assert.equal(body.lastCycle?.alertsSent, 3)
   assert.equal(body.env.seatsAeroApiKey, true)
-  assert.equal(body.env.smtpPassword, false)
+  assert.equal(body.env.twilioCreds, false)
 })
 
 test('stale rate-limit header from a previous UTC day is ignored', async () => {

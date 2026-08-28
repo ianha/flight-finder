@@ -11,7 +11,7 @@ export interface DealDigest {
   generatedAt: string
   oneways: DigestOneway[]
   roundtrips: DigestRoundtrip[]
-  /** Qualifying deals beyond the per-email caps. */
+  /** Qualifying deals beyond the per-alert caps. */
   onewayOverflowCount: number
   roundtripOverflowCount: number
   /** Cheapest total among overflowed roundtrips, for the "+N more from X" line. */

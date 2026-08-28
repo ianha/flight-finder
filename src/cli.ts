@@ -31,7 +31,7 @@ function globalOpts(): GlobalOpts {
 program
   .command('search')
   .description('run one poll cycle now (fetch, detect, alert)')
-  .option('--dry-run', 'print the digest instead of emailing; record no alert state', false)
+  .option('--dry-run', 'print the digest instead of texting; record no alert state', false)
   .option('--json', 'print detected deals as JSON', false)
   .action(async (opts: { dryRun: boolean; json: boolean }) => {
     const { searchCommand } = await import('./commands/search.js')
@@ -47,11 +47,11 @@ program
   })
 
 program
-  .command('test-email')
-  .description('send a canned digest through real SMTP to verify credentials')
+  .command('test-sms')
+  .description('send a canned digest through Twilio to verify credentials and numbers')
   .action(async () => {
-    const { testEmailCommand } = await import('./commands/testEmail.js')
-    await testEmailCommand(globalOpts())
+    const { testSmsCommand } = await import('./commands/testSms.js')
+    await testSmsCommand(globalOpts())
   })
 
 program

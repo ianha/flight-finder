@@ -22,7 +22,6 @@
     "better-sqlite3": "^13.0.3",
     "commander": "^15.0.0",
     "hono": "^4.13.2",
-    "nodemailer": "^9.0.5",
     "yaml": "^2.9.0",
     "zod": "^4.4.3"
   },
@@ -31,7 +30,6 @@
     "@fontsource/ibm-plex-mono": "^5.3.0",
     "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.2.0",
-    "@types/nodemailer": "^8.0.1",
     "@types/react": "^19.2.18",
     "@types/react-dom": "^19.2.4",
     "@vitejs/plugin-react": "^6.0.5",

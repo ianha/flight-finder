@@ -117,9 +117,9 @@ function SchedulerCard({
         <dd className={status.env.seatsAeroApiKey ? 'ok' : 'err'}>
           {status.env.seatsAeroApiKey ? 'set' : 'missing'}
         </dd>
-        <dt>SMTP_PASSWORD</dt>
-        <dd className={status.env.smtpPassword ? 'ok' : 'warn'}>
-          {status.env.smtpPassword ? 'set' : 'missing — alerts disabled'}
+        <dt>TWILIO credentials</dt>
+        <dd className={status.env.twilioCreds ? 'ok' : 'warn'}>
+          {status.env.twilioCreds ? 'set' : 'missing — SMS alerts disabled'}
         </dd>
       </dl>
       {toast && <div className={`toast ${toast.err ? 'err' : ''}`}>{toast.msg}</div>}

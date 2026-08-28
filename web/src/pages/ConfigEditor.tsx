@@ -281,11 +281,11 @@ export function ConfigEditor() {
         <Field label="Re-alert after gone (days)" path="alerts.realertGoneDays" issues={issues}>
           {numInput(d.alerts.realertGoneDays, (n) => set((c) => (c.alerts.realertGoneDays = n)), { width: 70 })}
         </Field>
-        <Field label="Max one-ways per email" path="alerts.maxOnewaysPerEmail" issues={issues}>
-          {numInput(d.alerts.maxOnewaysPerEmail, (n) => set((c) => (c.alerts.maxOnewaysPerEmail = n)), { width: 70 })}
+        <Field label="Max one-ways per alert" path="alerts.maxOnewaysPerAlert" issues={issues} hint="rest summarized as +N more">
+          {numInput(d.alerts.maxOnewaysPerAlert, (n) => set((c) => (c.alerts.maxOnewaysPerAlert = n)), { width: 70 })}
         </Field>
-        <Field label="Max roundtrips per email" path="alerts.maxRoundtripsPerEmail" issues={issues}>
-          {numInput(d.alerts.maxRoundtripsPerEmail, (n) => set((c) => (c.alerts.maxRoundtripsPerEmail = n)), { width: 70 })}
+        <Field label="Max roundtrips per alert" path="alerts.maxRoundtripsPerAlert" issues={issues}>
+          {numInput(d.alerts.maxRoundtripsPerAlert, (n) => set((c) => (c.alerts.maxRoundtripsPerAlert = n)), { width: 70 })}
         </Field>
         <Field label="Detail lookups per cycle" path="alerts.maxTripLookupsPerCycle" issues={issues} hint="flight numbers/taxes/links (API quota)">
           {numInput(d.alerts.maxTripLookupsPerCycle, (n) => set((c) => (c.alerts.maxTripLookupsPerCycle = n)), { width: 70 })}
@@ -312,45 +312,32 @@ export function ConfigEditor() {
         </Field>
       </Section>
 
-      <Section title="Email">
-        <Field label="From" path="email.from" issues={issues}>
+      <Section title="SMS (Twilio)">
+        <Field label="To numbers" path="sms.to" issues={issues} hint="comma-separated E.164, e.g. +14165551234">
           <input
             type="text"
-            defaultValue={d.email.from}
-            style={{ width: '100%' }}
-            onBlur={(e) => set((c) => (c.email.from = e.target.value))}
-          />
-        </Field>
-        <Field label="To" path="email.to" issues={issues} hint="comma-separated addresses">
-          <input
-            type="text"
-            defaultValue={d.email.to.join(', ')}
+            defaultValue={d.sms.to.join(', ')}
             style={{ width: '100%' }}
             onBlur={(e) =>
-              set((c) => (c.email.to = e.target.value.split(',').map((s) => s.trim()).filter(Boolean)))
+              set((c) => (c.sms.to = e.target.value.split(',').map((s) => s.trim()).filter(Boolean)))
             }
           />
         </Field>
-        <Field label="SMTP host" path="email.smtp.host" issues={issues}>
+        <Field label="From number" path="sms.from" issues={issues} hint="your Twilio number (E.164)">
           <input
             type="text"
-            defaultValue={d.email.smtp.host}
-            onBlur={(e) => set((c) => (c.email.smtp.host = e.target.value))}
+            defaultValue={d.sms.from}
+            onBlur={(e) => set((c) => (c.sms.from = e.target.value.trim()))}
           />
         </Field>
-        <Field label="SMTP port" path="email.smtp.port" issues={issues}>
-          {numInput(d.email.smtp.port, (n) => set((c) => (c.email.smtp.port = n)), { width: 80 })}
+        <Field label="Max segments per text" path="sms.maxSegments" issues={issues} hint="each billed segment is ~153 chars; digest truncates with +N more">
+          {numInput(d.sms.maxSegments, (n) => set((c) => (c.sms.maxSegments = n)), { width: 70 })}
         </Field>
-        <Field label="SMTP user" path="email.smtp.user" issues={issues}>
-          <input
-            type="text"
-            defaultValue={d.email.smtp.user}
-            onBlur={(e) => set((c) => (c.email.smtp.user = e.target.value))}
-          />
-        </Field>
-        <Field label="SMTP password" path="_env.smtp" issues={issues}>
-          <span className={status.data?.env.smtpPassword ? 'ok' : 'warn'} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>
-            {status.data?.env.smtpPassword ? 'set via SMTP_PASSWORD ✓' : 'missing — set SMTP_PASSWORD in .env'}
+        <Field label="Twilio credentials" path="_env.twilio" issues={issues}>
+          <span className={status.data?.env.twilioCreds ? 'ok' : 'warn'} style={{ fontFamily: 'var(--mono)', fontSize: 12 }}>
+            {status.data?.env.twilioCreds
+              ? 'set via TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN ✓'
+              : 'missing — set TWILIO_ACCOUNT_SID and TWILIO_AUTH_TOKEN in .env'}
           </span>
         </Field>
       </Section>

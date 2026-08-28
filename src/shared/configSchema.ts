@@ -11,6 +11,10 @@ const sourceId = z
   .string()
   .regex(/^[a-z]+$/, 'must be a lowercase seats.aero source id (e.g. aeroplan)')
 
+const e164Phone = z
+  .string()
+  .regex(/^\+[1-9]\d{1,14}$/, 'must be an E.164 phone number (e.g. +14165551234)')
+
 export const configSchema = z
   .object({
     api: z
@@ -66,8 +70,10 @@ export const configSchema = z
         mode: z.literal('digest').default('digest'),
         realertDropPct: z.number().min(0).max(100).default(15),
         realertGoneDays: z.number().int().min(1).default(7),
-        maxOnewaysPerEmail: z.number().int().min(1).default(20),
-        maxRoundtripsPerEmail: z.number().int().min(1).default(10),
+        // Per-alert caps sized for SMS: overflow is summarized as "+N more"
+        // and un-alerted overflow resurfaces next cycle.
+        maxOnewaysPerAlert: z.number().int().min(1).default(8),
+        maxRoundtripsPerAlert: z.number().int().min(1).default(4),
         maxTripLookupsPerCycle: z.number().int().min(0).default(25),
       })
       .prefault({}),
@@ -76,18 +82,15 @@ export const configSchema = z
         intervalHours: z.number().min(0.25).max(24).default(2),
       })
       .prefault({}),
-    email: z
+    sms: z
       .object({
-        from: z.string().min(1).default('Flight Deal Finder <ianha0@gmail.com>'),
-        to: z.array(z.email()).min(1).default(['ianha0@gmail.com']),
-        smtp: z
-          .object({
-            host: z.string().min(1).default('smtp.gmail.com'),
-            port: z.number().int().min(1).max(65535).default(465),
-            secure: z.boolean().default(true),
-            user: z.string().min(1).default('ianha0@gmail.com'),
-          })
-          .prefault({}),
+        // Empty defaults = "not configured yet": the service still runs (deals
+        // visible in the console) but sends nothing until both are set.
+        to: z.array(e164Phone).default([]),
+        from: z.union([e164Phone, z.literal('')]).default(''),
+        // Twilio splits long texts into segments (billed each); the digest is
+        // truncated with "+N more" to stay within this many.
+        maxSegments: z.number().int().min(1).max(10).default(3),
       })
       .prefault({}),
     // Read-only via the web UI (require manual edit + restart).

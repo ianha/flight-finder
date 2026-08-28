@@ -1,6 +1,6 @@
 # flight-deal-finder
 
-Personal watcher for business-class award seats between **Toronto (YYZ) / Chicago (ORD) / Vancouver (YVR) / Los Angeles (LAX)** and **Tokyo (NRT/HND)**, priced in points on **Aeroplan, BA Avios, Qatar Avios, and Flying Blue**. It polls continuously, emails you when it finds:
+Personal watcher for business-class award seats between **Toronto (YYZ) / Chicago (ORD) / Vancouver (YVR) / Los Angeles (LAX)** and **Tokyo (NRT/HND)**, priced in points on **Aeroplan, BA Avios, Qatar Avios, and Flying Blue**. It polls continuously, texts you (SMS via Twilio) when it finds:
 
 - a **one-way under 90,000 points**, or
 - a **roundtrip pairing under 180,000 points total** (booked as two one-ways; a leg may exceed 90k),
@@ -17,11 +17,11 @@ and serves a local web console at `http://127.0.0.1:8787` for browsing deals, a 
 2. Immediately check **Settings → API**: the Partner API tab is granted at seats.aero's discretion (geo-restricted for some accounts). If you don't see it, contact them before annualizing.
 3. Copy the `pro_…` key.
 
-### 2. Gmail app password
+### 2. Twilio account for SMS
 
-1. Enable 2-Step Verification on your Google account.
-2. Google Account → Security → App passwords → create one for "deal-finder".
-   (A regular Gmail password will not work over SMTP.)
+1. Create a [Twilio](https://www.twilio.com) account and buy an SMS-capable phone number (~US$1.15/mo + per-message fees; US-bound texts may require A2P 10DLC registration).
+2. Copy the **Account SID** and **Auth Token** from the Twilio Console into `.env`.
+3. Put your Twilio number in `config.yaml` under `sms.from`, and the number(s) to text under `sms.to` — E.164 format, e.g. `+14165551234`.
 
 ### 3. Install
 
@@ -38,7 +38,7 @@ Fill both secrets into `.env`. Everything else (routes, thresholds, stay window,
 ### 4. First-run checks
 
 ```bash
-node dist/cli.js test-email
+node dist/cli.js test-sms
 ```
 
 ```bash
@@ -53,10 +53,10 @@ node dist/cli.js probe-british
 node dist/cli.js search --dry-run
 ```
 
-- `test-email` verifies SMTP end to end — check your inbox.
+- `test-sms` sends a canned digest through Twilio end to end — check your phone.
 - `routes-audit` shows how far out seats.aero actually crawls each of your routes (`NumDaysOut`); deals beyond a route's horizon cannot be seen.
 - `probe-british` answers whether the undocumented BA Avios source works in the API. If it reports SUPPORTED, add `british` to `search.sources` in config — BA pricing then stops being an estimate.
-- `search --dry-run` runs a full cycle and prints the digest without sending email or recording alert state.
+- `search --dry-run` runs a full cycle and prints the digest without sending an SMS or recording alert state.
 
 ### 5. Install the always-on service (launchd)
 
@@ -90,7 +90,7 @@ Open **http://127.0.0.1:8787** — the console is localhost-only (the machine is
 |---|---|
 | `deal-finder serve` | Always-on service: internal scheduler + web console (what launchd runs) |
 | `deal-finder search [--dry-run] [--json]` | One poll cycle now; dry-run prints the digest, sends nothing, records nothing |
-| `deal-finder test-email` | Sends a canned digest through real SMTP |
+| `deal-finder test-sms` | Sends a canned digest through Twilio |
 | `deal-finder routes-audit` | Per-route crawl-horizon report |
 | `deal-finder probe-british` | Tests the undocumented `british` source |
 | `deal-finder status` | Quota, last cycle, data freshness, recent alerts |
@@ -99,7 +99,7 @@ Global flags: `--config <path>` (default `./config.yaml`), `--verbose`.
 
 ## How it works
 
-Every cycle (default: 2 h): two paginated cached-search calls cover the whole grid in both directions → records land in SQLite (`data/deals.db`) → one-way and roundtrip detection runs with your thresholds → new/improved deals are deduped (re-alert only on a ≥15% price drop vs the best ever alerted, or reappearance after ≥7 days gone) → qualifying deals get flight-level detail lookups (capped, budget-aware) → one digest email. Alert state is committed only after a successful send, so failures retry naturally next cycle.
+Every cycle (default: 2 h): two paginated cached-search calls cover the whole grid in both directions → records land in SQLite (`data/deals.db`) → one-way and roundtrip detection runs with your thresholds → new/improved deals are deduped (re-alert only on a ≥15% price drop vs the best ever alerted, or reappearance after ≥7 days gone) → qualifying deals get flight-level detail lookups (capped, budget-aware) → one compact digest SMS (full detail in the console). Alert state is committed only after a successful send, so failures retry naturally next cycle.
 
 **Quota discipline:** the API allows 1,000 calls/day (midnight UTC reset). The app self-caps at `api.dailyCallBudget` (900), watches the `X-RateLimit-Remaining` header, skips detail lookups below `api.reserveCalls`, and skips whole cycles rather than exhausting the quota.
 
@@ -135,7 +135,7 @@ The entire pipeline is testable without an API key: `test/mockServer.ts` plays s
 - Config: edit → Save → toast → `config.yaml` diff shows the change *and* your comments intact; invalid input shows an inline field error and blocks save; interval edit changes "next scheduled run" on Status
 - Run Now disables while a cycle runs and the history gains a `manual` row
 - `curl http://<your-lan-ip>:8787/api/health` from another machine fails (loopback-only)
-- seats.aero attribution visible on every screen and email
+- seats.aero attribution visible on every screen and SMS
 
 ## Data & state
 

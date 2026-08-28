@@ -272,7 +272,7 @@ async function runCycleLocked(
     const digestOneways: DigestOneway[] = []
     let tripLookups = 0
     let enrichmentStopped = false
-    for (const a of alertOneways.slice(0, cfg.alerts.maxOnewaysPerEmail)) {
+    for (const a of alertOneways.slice(0, cfg.alerts.maxOnewaysPerAlert)) {
       let detail: TripDetail | null = null
       if (
         !dryRun &&
@@ -298,32 +298,32 @@ async function runCycleLocked(
       digestOneways.push({ ...a, detail })
     }
 
-    const digestRoundtrips: DigestRoundtrip[] = alertRoundtrips.slice(0, cfg.alerts.maxRoundtripsPerEmail)
-    const rtOverflow = alertRoundtrips.slice(cfg.alerts.maxRoundtripsPerEmail)
+    const digestRoundtrips: DigestRoundtrip[] = alertRoundtrips.slice(0, cfg.alerts.maxRoundtripsPerAlert)
+    const rtOverflow = alertRoundtrips.slice(cfg.alerts.maxRoundtripsPerAlert)
     const digest: DealDigest = {
       generatedAt: startedAt,
       oneways: digestOneways,
       roundtrips: digestRoundtrips,
-      onewayOverflowCount: Math.max(alertOneways.length - cfg.alerts.maxOnewaysPerEmail, 0),
+      onewayOverflowCount: Math.max(alertOneways.length - cfg.alerts.maxOnewaysPerAlert, 0),
       roundtripOverflowCount: rtOverflow.length,
       roundtripOverflowFromPoints:
         rtOverflow.length > 0 ? Math.min(...rtOverflow.map((d) => d.deal.totalPoints)) : null,
       notes,
     }
 
-    // Alert + persist. Only deals the user actually SAW in the email are recorded
-    // as alerted — overflow beyond the per-email caps stays unrecorded and
+    // Alert + persist. Only deals the user actually SAW in the alert are recorded
+    // as alerted — overflow beyond the per-alert caps stays unrecorded and
     // resurfaces next cycle (trickling through the caps) instead of being
     // silently suppressed forever. Alert state is written only after a
     // successful send.
-    const emailedDeals: AlertableDeal[] = [...digestOneways, ...digestRoundtrips]
+    const alertedDeals: AlertableDeal[] = [...digestOneways, ...digestRoundtrips]
     let alertsSent = 0
-    if (emailedDeals.length > 0 && !dryRun) {
+    if (alertedDeals.length > 0 && !dryRun) {
       await notifier.sendDigest(digest)
-      alertsSent = emailedDeals.length
+      alertsSent = alertedDeals.length
       recordAlertedDeals(
         db,
-        emailedDeals.map((a) => ({
+        alertedDeals.map((a) => ({
           key: a.deal.key,
           kind: a.deal.kind,
           points: dealPoints(a.deal),
@@ -343,7 +343,7 @@ async function runCycleLocked(
     })
     log.info(
       `cycle done: status=${status} records=${recordsFetched} oneways=${oneways.length} ` +
-        `roundtrips=${roundtrips.length} alertable=${toAlert.length} emailed=${alertsSent} calls=${callsUsed}`,
+        `roundtrips=${roundtrips.length} alertable=${toAlert.length} alerted=${alertsSent} calls=${callsUsed}`,
     )
     return {
       status,
@@ -423,6 +423,6 @@ async function maybeSendFailureNotice(
     )
     metaSet(db, 'failure_notice_at', now().toISOString())
   } catch (err) {
-    log.warn(`failure-notice email also failed: ${(err as Error).message}`)
+    log.warn(`failure-notice SMS also failed: ${(err as Error).message}`)
   }
 }

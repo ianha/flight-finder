@@ -1,9 +1,10 @@
 import type { GlobalOpts } from '../cli.js'
-import { loadConfig, readEnvSecrets } from '../config.js'
+import { loadConfig, readEnvSecrets, twilioCredsPresent } from '../config.js'
 import { openDb } from '../db.js'
 import { SeatsAeroClient } from '../seatsAero.js'
 import { runCycle } from '../poll.js'
-import { EmailNotifier, renderText, subjectFor } from '../notify/email.js'
+import { renderText, subjectFor } from '../notify/render.js'
+import { SmsNotifier, smsConfigured } from '../notify/sms.js'
 import { nullNotifier, type Notifier } from '../notify/notifier.js'
 import { ATTRIBUTION, ATTRIBUTION_URL } from '../shared/constants.js'
 import { log } from '../log.js'
@@ -19,10 +20,18 @@ export async function searchCommand(
   }
   let notifier: Notifier = nullNotifier
   if (!opts.dryRun) {
-    if (!secrets.smtpPassword) {
-      throw new Error('SMTP_PASSWORD is not set — copy .env.example to .env and fill it in')
+    if (!twilioCredsPresent(secrets)) {
+      throw new Error(
+        'TWILIO_ACCOUNT_SID / TWILIO_AUTH_TOKEN are not set — copy .env.example to .env and fill them in',
+      )
     }
-    notifier = new EmailNotifier(cfg, secrets.smtpPassword)
+    if (!smsConfigured(cfg)) {
+      throw new Error('sms.to / sms.from are not configured — set them in config.yaml (E.164, e.g. +14165551234)')
+    }
+    notifier = new SmsNotifier(cfg, {
+      accountSid: secrets.twilioAccountSid,
+      authToken: secrets.twilioAuthToken,
+    })
   }
 
   const db = openDb(cfg.db.path)
@@ -51,8 +60,8 @@ export async function searchCommand(
   } else {
     log.info(
       outcome.alertsSent > 0
-        ? `alert email sent (${outcome.alertsSent} deals)`
-        : 'no new or improved deals — no email sent',
+        ? `alert SMS sent (${outcome.alertsSent} deals)`
+        : 'no new or improved deals — no SMS sent',
     )
     console.log(`${ATTRIBUTION} (${ATTRIBUTION_URL})`)
   }

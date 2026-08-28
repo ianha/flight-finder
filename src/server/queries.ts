@@ -221,7 +221,7 @@ export function buildStatus(
   db: Db,
   cfg: AppConfig,
   scheduler: { intervalHours: number; nextRunAt: string | null; cycleInFlight: { startedAt: string; trigger: string } | null } | null,
-  env: { seatsAeroApiKey: boolean; smtpPassword: boolean },
+  env: { seatsAeroApiKey: boolean; twilioCreds: boolean },
   now: Date,
 ): StatusResponse {
   const finished = getRecentCycles(db, 10).find((c) => c.status !== 'running')

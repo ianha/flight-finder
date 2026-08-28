@@ -18,7 +18,7 @@ import { normalizeAvailability, type AvailabilityRecord, type TripDetail } from 
 import { runCycle, type ClientLike } from '../src/poll.js'
 import { SeatsAeroClient } from '../src/seatsAero.js'
 import { Scheduler } from '../src/scheduler.js'
-import { EmailNotifier } from '../src/notify/email.js'
+import { SmsNotifier } from '../src/notify/sms.js'
 import type { DealDigest, Notifier } from '../src/notify/notifier.js'
 import { startMockServer, type MockServer } from './mockServer.js'
 import { makeAvailability, searchPage, type AvailabilityOverrides } from './helpers/fixtures.js'
@@ -267,7 +267,7 @@ test('overflowed deals are NOT marked alerted and resurface next cycle', async (
   openServers.push(server)
   const db = openDb(':memory:')
   const notifier = new CaptureNotifier()
-  const capped = parseConfig({ api: { baseUrl: server.url }, alerts: { maxOnewaysPerEmail: 1 } })
+  const capped = parseConfig({ api: { baseUrl: server.url }, alerts: { maxOnewaysPerAlert: 1 } })
   const deps = {
     db,
     cfg: capped,
@@ -319,9 +319,11 @@ test('failure notice fires at 6 consecutive errors, throttled to one per 24h', a
   assert.equal(notifier.failures.length, 2)
 })
 
-// --- email retry -----------------------------------------------------------
+// --- SMS retry -------------------------------------------------------------
 
-test('EmailNotifier retries transient SMTP failures and rethrows after 3 attempts', async () => {
+test('SmsNotifier retries transient failures and rethrows after 3 attempts', async () => {
+  const smsCfg = parseConfig({ sms: { to: ['+14165551234'], from: '+16475550123' } })
+  const creds = { accountSid: 'ACtest', authToken: 'tok' }
   const digest: DealDigest = {
     generatedAt: new Date().toISOString(),
     oneways: [],
@@ -332,28 +334,21 @@ test('EmailNotifier retries transient SMTP failures and rethrows after 3 attempt
     notes: [],
   }
   let calls = 0
-  const flaky = {
-    sendMail: async () => {
-      calls++
-      if (calls < 2) throw new Error('greylisted')
-    },
+  const flaky = async () => {
+    calls++
+    if (calls < 2) throw new Error('carrier hiccup')
   }
-  const notifier = new EmailNotifier(cfg, 'pw', {
-    retryDelayMs: 1,
-    transporter: flaky as never,
-  })
+  const notifier = new SmsNotifier(smsCfg, creds, { retryDelayMs: 1, transport: flaky })
   await notifier.sendDigest(digest) // fails once, succeeds on retry
   assert.equal(calls, 2)
 
   let always = 0
-  const dead = {
-    sendMail: async () => {
-      always++
-      throw new Error('SMTP down')
-    },
+  const dead = async () => {
+    always++
+    throw new Error('Twilio down')
   }
-  const failing = new EmailNotifier(cfg, 'pw', { retryDelayMs: 1, transporter: dead as never })
-  await assert.rejects(failing.sendDigest(digest), /SMTP down/)
+  const failing = new SmsNotifier(smsCfg, creds, { retryDelayMs: 1, transport: dead })
+  await assert.rejects(failing.sendDigest(digest), /Twilio down/)
   assert.equal(always, 3)
 })
 
@@ -418,7 +413,7 @@ test('PUT /api/config omitting read-only sections keeps current values (no defau
         return parsed
       },
     },
-    envPresence: () => ({ seatsAeroApiKey: true, smtpPassword: true }),
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: true }),
     version: 'test',
   })
 

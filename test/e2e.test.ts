@@ -5,7 +5,7 @@ import { parseConfig } from '../src/config.js'
 import { SeatsAeroClient } from '../src/seatsAero.js'
 import { runCycle } from '../src/poll.js'
 import type { DealDigest, Notifier } from '../src/notify/notifier.js'
-import { renderText, subjectFor } from '../src/notify/email.js'
+import { renderText, subjectFor } from '../src/notify/render.js'
 import { startMockServer, type MockServer } from './mockServer.js'
 import { makeAvailability, searchPage } from './helpers/fixtures.js'
 
@@ -66,7 +66,7 @@ class CaptureNotifier implements Notifier {
   async sendDigest(digest: DealDigest): Promise<void> {
     if (this.failNext) {
       this.failNext = false
-      throw new Error('SMTP down (simulated)')
+      throw new Error('Twilio down (simulated)')
     }
     this.digests.push(digest)
   }
@@ -114,7 +114,7 @@ test('full cycle: fetch -> detect -> alert once -> silent second cycle', async (
   // Alert state recorded.
   assert.ok(getAlertedDeal(db, 'OW|aeroplan|YYZ|NRT|2026-11-05'))
 
-  // Second cycle: nothing new — no email.
+  // Second cycle: nothing new — no alert.
   const second = await runCycle(deps(db, server.url, notifier), { trigger: 'manual' })
   assert.equal(second.status, 'ok')
   assert.equal(second.alertsSent, 0)
@@ -125,7 +125,7 @@ test('full cycle: fetch -> detect -> alert once -> silent second cycle', async (
   assert.ok(cycles.every((c) => c.status === 'ok'))
 })
 
-test('failed email send leaves alert state untouched (free retry next cycle)', async () => {
+test('failed SMS send leaves alert state untouched (free retry next cycle)', async () => {
   const server = await startMockServer(fixtureServerOptions())
   openServers.push(server)
   const db = openDb(':memory:')

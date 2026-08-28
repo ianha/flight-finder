@@ -60,7 +60,7 @@ function appWithConfig(path: string) {
     getConfig: () => configRef.current,
     scheduler: null,
     configApi,
-    envPresence: () => ({ seatsAeroApiKey: true, smtpPassword: true }),
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: true }),
     version: 'test',
   })
   return { app, configRef }
