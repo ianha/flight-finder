@@ -3,12 +3,14 @@ import {
   searchResponseSchema,
   tripsResponseSchema,
   apiTripSchema,
+  apiSegmentSchema,
   apiRouteSchema,
   parseMileage,
   type AvailabilityRecord,
   type Direction,
   type TripDetail,
 } from './types.js'
+import type { BookingLinkDto, SegmentDto, TripOptionDto } from './shared/apiTypes.js'
 import { log } from './log.js'
 
 export type ApiEndpoint = 'search' | 'trips' | 'routes'
@@ -27,6 +29,20 @@ export class QuotaExhaustedError extends Error {
     super('seats.aero daily API quota exhausted (429)')
     this.name = 'QuotaExhaustedError'
   }
+}
+
+/** Thrown on HTTP 404 — the resource (e.g. an availability id) no longer exists upstream. */
+export class NotFoundError extends Error {
+  constructor(readonly url: string) {
+    super(`seats.aero returned 404 for ${url}`)
+    this.name = 'NotFoundError'
+  }
+}
+
+/** All business-cabin trip options for one availability, DTO-ready. */
+export interface TripsFullResult {
+  options: TripOptionDto[]
+  bookingLinks: BookingLinkDto[]
 }
 
 export interface SeatsAeroClientOptions {
@@ -115,6 +131,7 @@ export class SeatsAeroClient {
       this.opts.onCall?.(endpoint, Number.isFinite(remaining as number) ? remaining : null)
 
       if (res.status === 400) throw new BadRequestError(url)
+      if (res.status === 404) throw new NotFoundError(url)
       if (res.status === 429) {
         if (quotaRetried) throw new QuotaExhaustedError()
         quotaRetried = true
@@ -200,44 +217,68 @@ export class SeatsAeroClient {
     }
   }
 
-  /** Flight-level detail for one availability record. Returns null on any failure (best-effort enrichment). */
-  async getTrips(availabilityId: string): Promise<TripDetail | null> {
-    let raw: unknown
-    try {
-      raw = await this.request('trips', `/trips/${availabilityId}`)
-    } catch (err) {
-      if (err instanceof QuotaExhaustedError) throw err
-      log.debug(`trips lookup failed for ${availabilityId}: ${(err as Error).message}`)
-      return null
-    }
+  /**
+   * All business-cabin trip options (with segments) for one availability record.
+   * Throws typed errors: NotFoundError (availability gone upstream),
+   * QuotaExhaustedError, BadRequestError, or Error for parse/transport failures.
+   */
+  async getTripsFull(availabilityId: string): Promise<TripsFullResult> {
+    const raw = await this.request('trips', `/trips/${encodeURIComponent(availabilityId)}`)
     const parsed = tripsResponseSchema.safeParse(raw)
-    if (!parsed.success) return null
+    if (!parsed.success) throw new Error('seats.aero trips response did not match expected envelope')
 
-    // Pick the cheapest business-cabin trip (the availability's headline record).
-    let best: TripDetailCandidate | null = null
+    const options: TripOptionDto[] = []
     for (const item of parsed.data.data) {
       const trip = apiTripSchema.safeParse(item)
       if (!trip.success) continue
       const t = trip.data
       if (t.Cabin && t.Cabin.toLowerCase() !== 'business') continue
-      const cost = parseMileage(t.MileageCost) ?? Number.MAX_SAFE_INTEGER
-      if (!best || cost < best.cost) best = { cost, trip: t }
+      const mileageCost = parseMileage(t.MileageCost)
+      if (mileageCost === null) continue
+      options.push({
+        flightNumbers: t.FlightNumbers ?? null,
+        departsAt: t.DepartsAt ?? null,
+        arrivesAt: t.ArrivesAt ?? null,
+        totalDurationMinutes: t.TotalDuration ?? null,
+        stops: t.Stops ?? null,
+        carriers: t.Carriers ?? null,
+        cabin: t.Cabin ?? null,
+        mileageCost,
+        seats: t.RemainingSeats ? t.RemainingSeats : null,
+        totalTaxes: t.TotalTaxes ?? null,
+        taxesCurrency: t.TaxesCurrency ?? null,
+        segments: parseSegments(t.AvailabilitySegments ?? []),
+      })
     }
-    if (!best) return null
-    const t = best.trip
+    options.sort((a, b) => a.mileageCost - b.mileageCost || (a.departsAt ?? '').localeCompare(b.departsAt ?? ''))
+
     return {
-      flightNumbers: t.FlightNumbers ?? null,
-      departsAt: t.DepartsAt ?? null,
-      arrivesAt: t.ArrivesAt ?? null,
-      stops: t.Stops ?? null,
-      carriers: t.Carriers ?? null,
-      totalTaxes: t.TotalTaxes ?? null,
-      taxesCurrency: t.TaxesCurrency ?? null,
-      bookingLinks: (parsed.data.booking_links ?? []).map((b) => ({
-        label: b.label,
-        link: b.link,
-        primary: b.primary,
-      })),
+      options: options.slice(0, MAX_TRIP_OPTIONS),
+      bookingLinks: sanitizeBookingLinks(parsed.data.booking_links ?? []),
+    }
+  }
+
+  /** Flight-level detail for one availability record. Returns null on any failure (best-effort enrichment). */
+  async getTrips(availabilityId: string): Promise<TripDetail | null> {
+    let full: TripsFullResult
+    try {
+      full = await this.getTripsFull(availabilityId)
+    } catch (err) {
+      if (err instanceof QuotaExhaustedError) throw err
+      log.debug(`trips lookup failed for ${availabilityId}: ${(err as Error).message}`)
+      return null
+    }
+    const best = full.options[0] // cheapest — options are sorted by mileage
+    if (!best) return null
+    return {
+      flightNumbers: best.flightNumbers,
+      departsAt: best.departsAt,
+      arrivesAt: best.arrivesAt,
+      stops: best.stops,
+      carriers: best.carriers,
+      totalTaxes: best.totalTaxes,
+      taxesCurrency: best.taxesCurrency,
+      bookingLinks: full.bookingLinks,
     }
   }
 
@@ -261,9 +302,54 @@ export class SeatsAeroClient {
   }
 }
 
-interface TripDetailCandidate {
-  cost: number
-  trip: import('./types.js').ApiTrip
+const MAX_TRIP_OPTIONS = 20
+const MAX_SEGMENTS_PER_OPTION = 8
+
+function parseSegments(raw: unknown[]): SegmentDto[] {
+  const segments: Array<Omit<SegmentDto, 'layoverMinutesAfter'>> = []
+  for (const item of raw) {
+    const seg = apiSegmentSchema.safeParse(item)
+    if (!seg.success) continue
+    const s = seg.data
+    segments.push({
+      flightNumber: s.FlightNumber ?? null,
+      originAirport: s.OriginAirport,
+      destinationAirport: s.DestinationAirport,
+      departsAt: s.DepartsAt,
+      arrivesAt: s.ArrivesAt,
+      aircraftName: s.AircraftName ?? null,
+      fareClass: s.FareClass ?? null,
+      order: s.Order ?? segments.length,
+    })
+  }
+  segments.sort((a, b) => a.order - b.order)
+  return segments.slice(0, MAX_SEGMENTS_PER_OPTION).map((s, i, all) => {
+    const next = all[i + 1]
+    let layoverMinutesAfter: number | null = null // last segment stays null by contract
+    if (next) {
+      const gap = Date.parse(next.departsAt) - Date.parse(s.arrivesAt)
+      if (Number.isFinite(gap) && gap >= 0) layoverMinutesAfter = Math.round(gap / 60_000)
+    }
+    return { ...s, layoverMinutesAfter }
+  })
+}
+
+/** Untrusted upstream URLs: only http(s) links survive (noopener does not stop javascript:/data: hrefs). */
+function sanitizeBookingLinks(
+  raw: Array<{ label: string; link: string; primary: boolean }>,
+): BookingLinkDto[] {
+  const links: BookingLinkDto[] = []
+  for (const b of raw) {
+    let protocol: string
+    try {
+      protocol = new URL(b.link).protocol
+    } catch {
+      continue
+    }
+    if (protocol !== 'http:' && protocol !== 'https:') continue
+    links.push({ label: b.label, link: b.link, primary: b.primary })
+  }
+  return links
 }
 
 function sleep(ms: number): Promise<void> {

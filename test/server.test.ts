@@ -25,6 +25,9 @@ import { Scheduler } from '../src/scheduler.js'
 import type { CycleOutcome } from '../src/poll.js'
 import { normalizeAvailability } from '../src/types.js'
 import { makeAvailability, type AvailabilityOverrides } from './helpers/fixtures.js'
+import { TripDetailService, type TripsFetcher } from '../src/server/tripDetails.js'
+import { NotFoundError, type TripsFullResult } from '../src/seatsAero.js'
+import { getCallsUsed, utcDay } from '../src/db.js'
 
 function seed(db: Db, over: AvailabilityOverrides, direction: 'outbound' | 'return'): void {
   const rec = normalizeAvailability(makeAvailability(over), direction)
@@ -271,4 +274,134 @@ test('scheduler computes drift-corrected next run from last cycle time', () => {
   })
   // Overdue → next run is now, not in the past.
   assert.equal(overdue.nextRunAt(), NOW.toISOString())
+})
+
+// --- trips detail endpoint ---
+
+function tripsResult(): TripsFullResult {
+  return {
+    options: [
+      {
+        flightNumbers: 'NH116',
+        departsAt: '2026-11-05T17:15:00Z',
+        arrivesAt: '2026-11-06T19:50:00Z',
+        totalDurationMinutes: 815,
+        stops: 0,
+        carriers: 'ANA',
+        cabin: 'business',
+        mileageCost: 62_500,
+        seats: 2,
+        totalTaxes: 11_200,
+        taxesCurrency: 'CAD',
+        segments: [],
+      },
+    ],
+    bookingLinks: [{ label: 'Book via Aeroplan', link: 'https://www.aircanada.com', primary: true }],
+  }
+}
+
+function makeTripsApp(db: Db, fetcher: TripsFetcher | null) {
+  const tripDetails = new TripDetailService({
+    db,
+    getClient: () => fetcher,
+    getConfig: () => parseConfig({}),
+    now: () => NOW,
+  })
+  return buildApp({
+    db,
+    getConfig: () => parseConfig({}),
+    scheduler: null,
+    envPresence: () => ({ seatsAeroApiKey: fetcher !== null, twilioCreds: false }),
+    tripDetails,
+    version: 'test',
+    now: () => NOW,
+  })
+}
+
+test('GET /api/trips/:id returns detail body and charges the trips-web ledger', async () => {
+  const db = openDb(':memory:')
+  const app = makeTripsApp(db, { getTripsFull: async () => tripsResult() })
+  const res = await app.request('/api/trips/avail-1')
+  assert.equal(res.status, 200)
+  const body = (await res.json()) as import('../src/shared/apiTypes.js').TripDetailOkResponse
+  assert.equal(body.availabilityId, 'avail-1')
+  assert.equal(body.options[0]?.flightNumbers, 'NH116')
+  assert.equal(body.bookingLinks[0]?.primary, true)
+  assert.equal(body.fetchedAt, NOW.toISOString())
+  assert.equal(getCallsUsed(db, utcDay(NOW)), 1)
+})
+
+test('GET /api/trips/:id maps typed failures to statuses', async () => {
+  const gone = makeTripsApp(openDb(':memory:'), {
+    getTripsFull: async () => {
+      throw new NotFoundError('https://example.com/trips/gone')
+    },
+  })
+  assert.equal((await gone.request('/api/trips/gone')).status, 404)
+  assert.deepEqual(await (await gone.request('/api/trips/gone')).json(), { error: 'expired' })
+
+  const broken = makeTripsApp(openDb(':memory:'), {
+    getTripsFull: async () => {
+      throw new Error('seats.aero 500 for https://internal.example/trips/x')
+    },
+  })
+  const res = await broken.request('/api/trips/x')
+  assert.equal(res.status, 502)
+  // No upstream detail leaks into the body.
+  assert.deepEqual(await res.json(), { error: 'upstream_error' })
+
+  const keyless = makeTripsApp(openDb(':memory:'), null)
+  const keylessRes = await keyless.request('/api/trips/avail-1')
+  assert.equal(keylessRes.status, 400)
+  assert.deepEqual(await keylessRes.json(), { error: 'no_api_key' })
+})
+
+test('GET /api/trips/:id rejects malformed ids before any side effect', async () => {
+  const db = openDb(':memory:')
+  let fetches = 0
+  const app = makeTripsApp(db, {
+    getTripsFull: async () => {
+      fetches++
+      return tripsResult()
+    },
+  })
+  for (const bad of ['..%2Fsearch', 'a b', 'x'.repeat(65)]) {
+    const res = await app.request(`/api/trips/${bad}`)
+    assert.equal(res.status, 400, `expected 400 for ${bad}`)
+    assert.deepEqual(await res.json(), { error: 'invalid_availability_id' })
+  }
+  // Router path-normalizes '%2e%2e' ('..') away before the handler — rejected
+  // upstream of us; the invariant is only that no side effect happens.
+  assert.equal((await app.request('/api/trips/%2e%2e')).status, 404)
+  assert.equal(fetches, 0)
+  assert.equal(getCallsUsed(db, utcDay(NOW)), 0)
+})
+
+test('GET /api/trips without the serve-mode dep returns no_api_key', async () => {
+  const app = makeApp(openDb(':memory:'), null) // no tripDetails
+  const res = await app.request('/api/trips/avail-1')
+  assert.equal(res.status, 400)
+  assert.deepEqual(await res.json(), { error: 'no_api_key' })
+})
+
+test('api middleware rejects foreign Origin and non-loopback Host', async () => {
+  const app = makeApp(seededDb(), null)
+
+  const foreignOrigin = await app.request('/api/health', {
+    headers: { origin: 'https://evil.example' },
+  })
+  assert.equal(foreignOrigin.status, 403)
+
+  const rebound = await app.request('/api/health', {
+    headers: { host: 'evil.example:8787' },
+  })
+  assert.equal(rebound.status, 403)
+
+  const nullOrigin = await app.request('/api/health', { headers: { origin: 'null' } })
+  assert.equal(nullOrigin.status, 403)
+
+  const local = await app.request('/api/health', {
+    headers: { host: 'localhost:5173', origin: 'http://127.0.0.1:5173' },
+  })
+  assert.equal(local.status, 200)
 })

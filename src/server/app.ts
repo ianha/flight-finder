@@ -7,8 +7,11 @@ import type {
   RunConflictResponse,
   RunStartedResponse,
   CyclesResponse,
+  ApiError,
+  TripDetailOkResponse,
 } from '../shared/apiTypes.js'
 import type { InFlightInfo } from '../scheduler.js'
+import type { TripDetailService } from './tripDetails.js'
 import {
   buildStatus,
   recentCycles,
@@ -42,15 +45,35 @@ export interface AppDeps {
   /** Present in serve mode; enables GET/PUT /api/config. */
   configApi?: ConfigFacade
   envPresence: () => { seatsAeroApiKey: boolean; twilioCreds: boolean }
+  /** Present in serve mode; enables GET /api/trips/:availabilityId. */
+  tripDetails?: TripDetailService
   version: string
   now?: () => Date
 }
 
 const READ_ONLY_PATHS = ['db.path', 'server.port'] as const
 
+const AVAILABILITY_ID_RE = /^[A-Za-z0-9_-]{1,64}$/
+
 export function buildApp(deps: AppDeps): Hono {
   const now = deps.now ?? (() => new Date())
   const app = new Hono()
+
+  // The server binds to 127.0.0.1, but that does not stop a malicious page in
+  // the user's own browser from firing cross-origin "simple requests" that burn
+  // API quota blind, and DNS rebinding can even make responses readable. A
+  // foreign Origin or non-loopback Host has no business here.
+  app.use('/api/*', async (c, next) => {
+    const host = c.req.header('host')
+    if (host !== undefined && !isLoopbackHost(host)) {
+      return c.json({ error: 'forbidden' } satisfies ApiError, 403)
+    }
+    const origin = c.req.header('origin')
+    if (origin !== undefined && !isLoopbackOrigin(origin)) {
+      return c.json({ error: 'forbidden' } satisfies ApiError, 403)
+    }
+    await next()
+  })
 
   app.get('/api/health', (c) => {
     return c.json({ ok: true, version: deps.version } satisfies HealthResponse)
@@ -127,6 +150,27 @@ export function buildApp(deps: AppDeps): Hono {
     return c.json({
       alerts: queryAlerts(deps.db, limit, kind === 'oneway' || kind === 'roundtrip' ? kind : undefined),
     })
+  })
+
+  app.get('/api/trips/:availabilityId', async (c) => {
+    const id = c.req.param('availabilityId')
+    if (!AVAILABILITY_ID_RE.test(id)) {
+      return c.json({ error: 'invalid_availability_id' } satisfies ApiError, 400)
+    }
+    if (!deps.tripDetails) return c.json({ error: 'no_api_key' } satisfies ApiError, 400)
+    const outcome = await deps.tripDetails.get(id)
+    switch (outcome.kind) {
+      case 'ok':
+        return c.json(outcome.body satisfies TripDetailOkResponse)
+      case 'no_api_key':
+        return c.json({ error: 'no_api_key' } satisfies ApiError, 400)
+      case 'expired':
+        return c.json({ error: 'expired' } satisfies ApiError, 404)
+      case 'quota_exhausted':
+        return c.json({ error: 'quota_exhausted' } satisfies ApiError, 503)
+      case 'upstream_error':
+        return c.json({ error: 'upstream_error' } satisfies ApiError, 502)
+    }
   })
 
   app.get('/api/config', (c) => {
@@ -246,4 +290,24 @@ function parseDirection(raw: string | undefined): Direction | undefined {
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v)
+}
+
+const LOOPBACK_HOSTNAMES = new Set(['127.0.0.1', 'localhost', '[::1]', '::1'])
+
+function isLoopbackHost(host: string): boolean {
+  // Host header is "hostname" or "hostname:port"; IPv6 hostnames are bracketed.
+  const hostname = host.startsWith('[')
+    ? host.slice(0, host.indexOf(']') + 1)
+    : host.split(':')[0]!
+  return LOOPBACK_HOSTNAMES.has(hostname.toLowerCase())
+}
+
+function isLoopbackOrigin(origin: string): boolean {
+  let url: URL
+  try {
+    url = new URL(origin)
+  } catch {
+    return false // includes the literal "null" origin
+  }
+  return LOOPBACK_HOSTNAMES.has(url.hostname.toLowerCase())
 }

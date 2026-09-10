@@ -188,3 +188,99 @@ test('getRoutes parses route horizon info', async () => {
   assert.equal(routes.length, 1)
   assert.equal(routes[0]?.numDaysOut, 340)
 })
+
+test('getTripsFull returns all business options sorted by mileage, with segments and layovers', async () => {
+  const server = await startMockServer({
+    trips: {
+      'avail-full': {
+        data: [
+          makeTrip({
+            MileageCost: '75000',
+            FlightNumbers: 'AC5, AC6',
+            Stops: 1,
+            AvailabilitySegments: [
+              {
+                FlightNumber: 'AC6',
+                OriginAirport: 'YVR',
+                DestinationAirport: 'NRT',
+                DepartsAt: '2026-11-05T13:30:00Z',
+                ArrivesAt: '2026-11-06T01:50:00Z',
+                AircraftName: '789',
+                FareClass: 'I',
+                Order: 1,
+              },
+              {
+                FlightNumber: 'AC5',
+                OriginAirport: 'YYZ',
+                DestinationAirport: 'YVR',
+                DepartsAt: '2026-11-05T08:00:00Z',
+                ArrivesAt: '2026-11-05T10:05:00Z',
+                AircraftName: '77W',
+                FareClass: 'I',
+                Order: 0,
+              },
+            ],
+          }),
+          makeTrip({ MileageCost: '62500', FlightNumbers: 'NH116', RemainingSeats: 0 }),
+          makeTrip({ MileageCost: '10000', Cabin: 'economy' }),
+          makeTrip({ MileageCost: null, FlightNumbers: 'NO-PRICE' }),
+        ],
+        booking_links: [
+          { label: 'Book via LifeMiles', link: 'https://www.lifemiles.com/fly/find', primary: true },
+          { label: 'Book via Aeroplan', link: 'https://www.aircanada.com/aeroplan', primary: false },
+          { label: 'Evil', link: 'javascript:alert(1)', primary: false },
+          { label: 'Broken', link: 'not a url', primary: false },
+        ],
+      },
+    },
+  })
+  openServers.push(server)
+  const client = makeClient(server.url)
+
+  const full = await client.getTripsFull('avail-full')
+  // economy and unpriced options are dropped; remaining sorted by mileage.
+  assert.equal(full.options.length, 2)
+  assert.equal(full.options[0]?.flightNumbers, 'NH116')
+  assert.equal(full.options[0]?.seats, null) // RemainingSeats 0 → null ("—" convention)
+  assert.equal(full.options[1]?.mileageCost, 75000)
+
+  // Segments ordered by Order, layover derived, last segment null by contract.
+  const segs = full.options[1]?.segments ?? []
+  assert.equal(segs.length, 2)
+  assert.equal(segs[0]?.flightNumber, 'AC5')
+  assert.equal(segs[0]?.layoverMinutesAfter, 205) // 10:05 → 13:30
+  assert.equal(segs[1]?.layoverMinutesAfter, null)
+  assert.equal(segs[1]?.aircraftName, '789')
+
+  // Non-http(s) and unparseable links are stripped; order preserved.
+  assert.deepEqual(
+    full.bookingLinks.map((b) => b.label),
+    ['Book via LifeMiles', 'Book via Aeroplan'],
+  )
+})
+
+test('getTripsFull throws NotFoundError on 404 and URL-encodes the id', async () => {
+  const { NotFoundError } = await import('../src/seatsAero.js')
+  const server = await startMockServer({ trips: {} })
+  openServers.push(server)
+  const client = makeClient(server.url)
+  await assert.rejects(client.getTripsFull('gone-id'), NotFoundError)
+  await assert.rejects(client.getTripsFull('../search?x'), NotFoundError)
+  const tripReqs = server.requests.filter((r) => r.endpoint === 'trips')
+  assert.ok(tripReqs[1]?.path.includes(encodeURIComponent('../search?x')))
+})
+
+test('getTrips rethrows only QuotaExhaustedError; every other failure returns null', async () => {
+  // 404 → null (regression guard: poll enrichment depends on this contract).
+  const server = await startMockServer({ trips: {} })
+  openServers.push(server)
+  const client = makeClient(server.url)
+  assert.equal(await client.getTrips('gone'), null)
+
+  // Persistent 429 → QuotaExhaustedError propagates.
+  const quotaServer = await startMockServer({})
+  quotaServer.setMode('error429')
+  openServers.push(quotaServer)
+  const quotaClient = makeClient(quotaServer.url)
+  await assert.rejects(quotaClient.getTrips('any'), QuotaExhaustedError)
+})

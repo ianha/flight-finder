@@ -40,6 +40,17 @@ export const searchResponseSchema = z.object({
   cursor: z.union([z.number(), z.string()]).optional(),
 })
 
+export const apiSegmentSchema = z.object({
+  FlightNumber: z.string().nullish(),
+  OriginAirport: z.string(),
+  DestinationAirport: z.string(),
+  DepartsAt: z.string(),
+  ArrivesAt: z.string(),
+  AircraftName: z.string().nullish(),
+  FareClass: z.string().nullish(),
+  Order: z.number().nullish(),
+})
+
 export const apiTripSchema = z.object({
   ID: z.string(),
   AvailabilityID: z.string().optional(),
@@ -56,6 +67,7 @@ export const apiTripSchema = z.object({
   ArrivesAt: z.string().nullish(),
   Cabin: z.string().nullish(),
   Source: z.string().optional(),
+  AvailabilitySegments: z.array(z.unknown()).nullish(),
 })
 
 export const tripsResponseSchema = z.object({

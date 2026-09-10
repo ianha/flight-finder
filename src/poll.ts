@@ -5,7 +5,6 @@ import {
   startCycle,
   finishCycle,
   incrementApiCalls,
-  getCallsUsed,
   metaGet,
   metaSet,
   recordAlertedDeals,
@@ -20,6 +19,7 @@ import {
   type CycleStatus,
 } from './db.js'
 import { deriveWindow } from './config.js'
+import { estimatedRemaining as quotaRemaining } from './quota.js'
 import { detectOneways } from './deals/oneway.js'
 import { detectRoundtrips } from './deals/roundtrip.js'
 import { filterForAlert, type AlertableDeal } from './deals/dedupe.js'
@@ -121,16 +121,7 @@ async function runCycleLocked(
   }
   const client = deps.clientFactory(onCall)
 
-  const estimatedRemaining = (): number => {
-    const used = getCallsUsed(db, utcDay(now()))
-    let remaining = cfg.api.dailyCallBudget - used
-    const seenAt = metaGet(db, 'rate_limit_seen_at')
-    const headerRemaining = metaGet(db, 'rate_limit_remaining')
-    if (seenAt !== undefined && headerRemaining !== undefined && seenAt.slice(0, 10) === utcDay(now())) {
-      remaining = Math.min(remaining, parseInt(headerRemaining, 10))
-    }
-    return remaining
-  }
+  const estimatedRemaining = (): number => quotaRemaining(db, cfg, now)
 
   // Pre-flight quota gate.
   if (estimatedRemaining() <= cfg.api.reserveCalls) {

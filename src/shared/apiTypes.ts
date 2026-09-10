@@ -142,6 +142,58 @@ export interface AlertsResponse {
   alerts: AlertDto[]
 }
 
+// --- trips (deal detail view) ---
+
+export interface BookingLinkDto {
+  label: string
+  link: string
+  primary: boolean
+}
+
+export interface SegmentDto {
+  flightNumber: string | null
+  originAirport: string
+  destinationAirport: string
+  /** Airport-local ISO 8601, verbatim from upstream — never convert to viewer timezone. */
+  departsAt: string
+  arrivesAt: string
+  aircraftName: string | null
+  fareClass: string | null
+  /** Ground time before the next segment; null on the last segment by contract. */
+  layoverMinutesAfter: number | null
+  order: number
+}
+
+export interface TripOptionDto {
+  flightNumbers: string | null
+  departsAt: string | null
+  arrivesAt: string | null
+  totalDurationMinutes: number | null
+  stops: number | null
+  carriers: string | null
+  cabin: string | null
+  /** Options without a parseable mileage cost are dropped upstream, so this stays sortable. */
+  mileageCost: number
+  /** Upstream RemainingSeats 0/null → null ("—" convention, matches DealLegDto.seats). */
+  seats: number | null
+  /** Cents, when known. 0 is a real value — null means unknown. */
+  totalTaxes: number | null
+  taxesCurrency: string | null
+  segments: SegmentDto[]
+}
+
+/**
+ * 200 body for GET /api/trips/:availabilityId. Failures use HTTP statuses with
+ * ApiError bodies: 400 invalid_availability_id | no_api_key, 404 expired,
+ * 502 upstream_error, 503 quota_exhausted.
+ */
+export interface TripDetailOkResponse {
+  availabilityId: string
+  options: TripOptionDto[]
+  bookingLinks: BookingLinkDto[]
+  fetchedAt: string
+}
+
 // --- config (Phase 4) ---
 
 export interface ConfigResponse {

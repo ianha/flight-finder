@@ -1,11 +1,12 @@
 import { serve } from '@hono/node-server'
 import type { GlobalOpts } from '../cli.js'
 import { loadConfig, parseConfig, writeConfig, readEnvSecrets, twilioCredsPresent } from '../config.js'
-import { openDb, metaGet } from '../db.js'
+import { openDb, metaGet, metaSet } from '../db.js'
 import { SeatsAeroClient } from '../seatsAero.js'
 import { runCycle } from '../poll.js'
 import { Scheduler } from '../scheduler.js'
 import { buildApp } from '../server/app.js'
+import { TripDetailService } from '../server/tripDetails.js'
 import { registerStatic } from '../server/static.js'
 import { SmsNotifier, smsConfigured } from '../notify/sms.js'
 import { nullNotifier, type Notifier } from '../notify/notifier.js'
@@ -69,10 +70,33 @@ export async function serveCommand(g: GlobalOpts): Promise<void> {
       })
     : null
 
+  // On-demand trip details for the web console. The service charges the shared
+  // api_calls ledger itself (endpoint 'trips-web'), so the client's onCall only
+  // refreshes the rate-limit-header estimate — incrementing there too would
+  // double-charge every lookup.
+  const tripDetails = new TripDetailService({
+    db,
+    getClient: () =>
+      apiKey
+        ? new SeatsAeroClient({
+            baseUrl: configRef.current.api.baseUrl,
+            apiKey,
+            onCall: (_endpoint, remaining) => {
+              if (remaining !== null) {
+                metaSet(db, 'rate_limit_remaining', String(remaining))
+                metaSet(db, 'rate_limit_seen_at', new Date().toISOString())
+              }
+            },
+          })
+        : null,
+    getConfig: () => configRef.current,
+  })
+
   const app = buildApp({
     db,
     getConfig: () => configRef.current,
     scheduler,
+    tripDetails,
     configApi: {
       path: configRef.path,
       apply: (raw) => {
