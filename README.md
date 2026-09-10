@@ -105,6 +105,12 @@ Every cycle (default: 2 h): two paginated cached-search calls cover the whole gr
 
 **BA Avios estimates:** BA Avios is not a documented API source. Oneworld space (JAL/AA nonstops) is detected via the `american`/`alaska` sources and priced from static 2026 Avios distance-band charts (Qatar's chart is verified; BA's long-haul bands are ~+10% post-Dec-2025 community estimates). These deals are loudly flagged **~est** everywhere — JAL's 2026 fuel surcharges (≈US$370–440/sector) are *not* included. Run `probe-british` periodically to check whether direct BA data has become available.
 
+## Deal details & booking
+
+Click any deal row in the console (or its `›` button) to open a detail drawer: every business-cabin option for that availability with flight numbers, per-segment times (shown airport-local, `+1` marking next-day arrivals), layovers, aircraft, fare class, and taxes — plus “Book via …” links that deep-link into the loyalty program's booking flow (the primary link is the source program; the others are alliance partners that can book the same space). Roundtrips open as two independent legs, because they are booked as two separate one-way awards.
+
+Quota implications: each first click on a deal costs **1 API call** (`GET /trips/{id}`); results are cached in-process for 30 minutes, repeat and concurrent clicks are free, and the endpoint refuses below `api.reserveCalls` so browsing can never starve the alert poller. In UI-only mode (no API key) rows are not clickable. Booking is manual by design — links land on the program's search page; verify space there before transferring points.
+
 ## Caveats (read before booking)
 
 - Cached data is minutes-to-hours stale; phantom availability happens. **Always verify on the program's own site** — every alert links out and shows data age.
@@ -134,6 +140,7 @@ Without `SEATS_AERO_API_KEY`, `serve` still boots in UI-only mode (console + con
 - Run Now disables while a cycle runs and the history gains a `manual` row
 - `curl http://<your-lan-ip>:8787/api/health` from another machine fails (loopback-only)
 - seats.aero attribution visible on every screen and SMS
+- Deal row click opens the detail drawer (options, segments, booking links, verify callout); Escape/backdrop/✕ close it; a roundtrip shows two leg sections; a second open within 30 min adds no `trips-web` calls on Status
 
 ## Data & state
 

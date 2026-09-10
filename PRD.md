@@ -53,6 +53,7 @@ One user (the owner), one always-on Mac. The web server binds to 127.0.0.1 only;
 - FR-3.2 Calendar view: per-date minimum business points for the next 12 months, per direction.
 - FR-3.3 Status view: API quota usage, scheduler state, cycle history, recent alerts, secret-presence indicators.
 - FR-3.4 A visible "cycle running" indicator and seats.aero attribution on every screen.
+- FR-3.5 Deal detail: any listed deal opens a detail view showing all business-cabin trip options (flight numbers, airport-local segment times, layovers, aircraft, fare class, taxes) and seats.aero booking links (primary program first), with data age and a verify-before-transferring-points caveat adjacent to the links. Roundtrips present two independent legs framed as separate one-way bookings. On-demand lookups share the daily API budget, are cached for 30 minutes, and are refused below the reserve floor; booking itself remains manual (FR-2.4, Non-goals).
 
 ### FR-4 Web configuration
 - FR-4.1 View the full effective configuration (defaults applied, secrets excluded) in a form.
