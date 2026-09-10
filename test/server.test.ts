@@ -112,6 +112,11 @@ test('GET /api/status reports quota math, last cycle, and env presence', async (
   assert.equal(body.lastCycle?.alertsSent, 3)
   assert.equal(body.env.seatsAeroApiKey, true)
   assert.equal(body.env.twilioCreds, false)
+  assert.deepEqual(body.search, {
+    origins: ['YYZ', 'ORD', 'YVR', 'LAX'],
+    destinations: ['NRT', 'HND'],
+    destinationLabel: 'Tokyo',
+  })
 })
 
 test('stale rate-limit header from a previous UTC day is ignored', async () => {

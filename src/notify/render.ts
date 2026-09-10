@@ -58,7 +58,7 @@ function estimateNote(leg: DealLeg): string | null {
   )
 }
 
-export function subjectFor(digest: DealDigest): string {
+export function subjectFor(digest: DealDigest, destinationLabel = 'Tokyo'): string {
   const parts: string[] = []
   if (digest.oneways.length > 0) {
     const min = Math.min(...digest.oneways.map((d) => d.deal.points))
@@ -68,7 +68,7 @@ export function subjectFor(digest: DealDigest): string {
     const min = Math.min(...digest.roundtrips.map((d) => d.deal.totalPoints))
     parts.push(`${digest.roundtrips.length} roundtrip${digest.roundtrips.length === 1 ? '' : 's'} from ${fmtPtsShort(min)}`)
   }
-  return `[Deal Finder] ${parts.join(', ') || 'update'} — Tokyo J`
+  return `[Deal Finder] ${parts.join(', ') || 'update'} — ${destinationLabel} J`
 }
 
 function renderOnewayText(d: DigestOneway, nowIso: string): string {

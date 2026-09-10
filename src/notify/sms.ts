@@ -62,7 +62,7 @@ function legLine(leg: DealLeg): string {
  * budget runs out; everything else is summarized as "+N more". The attribution
  * line always fits (seats.aero ToS requires visible attribution).
  */
-export function renderSms(digest: DealDigest, maxSegments: number): string {
+export function renderSms(digest: DealDigest, maxSegments: number, destinationLabel = 'Tokyo'): string {
   const budget = maxSmsChars(maxSegments)
   const header: string[] = []
   if (digest.oneways.length > 0) {
@@ -73,7 +73,8 @@ export function renderSms(digest: DealDigest, maxSegments: number): string {
     const min = Math.min(...digest.roundtrips.map((d) => d.deal.totalPoints))
     header.push(`${digest.roundtrips.length + digest.roundtripOverflowCount} RT fr ${fmtPtsShort(min)}`)
   }
-  const lines: string[] = [`Tokyo J deals: ${header.join(', ') || 'update'}`]
+  // asciiSafe: a configured label may carry non-GSM-7 characters; deal lines are already sanitized below.
+  const lines: string[] = [asciiSafe(`${destinationLabel} J deals: ${header.join(', ') || 'update'}`)]
 
   const footerLines = (extraCount: number): string[] => {
     const out: string[] = []
@@ -193,7 +194,9 @@ export class SmsNotifier implements Notifier {
   }
 
   async sendDigest(digest: DealDigest): Promise<void> {
-    await this.sendWithRetry(renderSms(digest, this.getCfg().sms.maxSegments))
+    await this.sendWithRetry(
+      renderSms(digest, this.getCfg().sms.maxSegments, this.getCfg().search.destinationLabel),
+    )
   }
 
   async sendFailureNotice(message: string): Promise<void> {

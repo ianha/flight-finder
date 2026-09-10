@@ -8,6 +8,7 @@ test('empty config yields full defaults', () => {
   assert.equal(cfg.thresholds.roundtripMaxPoints, 180_000)
   assert.deepEqual(cfg.search.origins, ['YYZ', 'ORD', 'YVR', 'LAX'])
   assert.deepEqual(cfg.search.destinations, ['NRT', 'HND'])
+  assert.equal(cfg.search.destinationLabel, 'Tokyo')
   assert.equal(cfg.search.window.endOffsetDays, 355)
   assert.equal(cfg.search.proxySources.enabled, true)
   assert.equal(cfg.roundtrip.minStayNights, 3)
@@ -26,6 +27,7 @@ test('partial config merges with defaults', () => {
   assert.equal(cfg.thresholds.roundtripMaxPoints, 180_000)
   assert.deepEqual(cfg.search.origins, ['YYZ'])
   assert.deepEqual(cfg.search.destinations, ['NRT', 'HND'])
+  assert.equal(cfg.search.destinationLabel, 'Tokyo')
 })
 
 test('endOffsetDays above 355 clamps to 355', () => {

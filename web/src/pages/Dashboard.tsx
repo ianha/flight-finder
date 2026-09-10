@@ -10,8 +10,20 @@ import type {
   RoundtripDealDto,
 } from '@shared/apiTypes'
 
-const ORIGINS = ['', 'YYZ', 'ORD', 'YVR', 'LAX', 'NRT', 'HND']
 const SOURCES = ['', 'aeroplan', 'flyingblue', 'qatar', 'american', 'alaska', 'british']
+
+export interface SearchGeo {
+  origins: string[]
+  destinations: string[]
+  destinationLabel: string
+}
+
+/** Matches the configSchema defaults — covers the first render before /api/status answers. */
+export const DEFAULT_GEO: SearchGeo = {
+  origins: ['YYZ', 'ORD', 'YVR', 'LAX'],
+  destinations: ['NRT', 'HND'],
+  destinationLabel: 'Tokyo',
+}
 
 interface Filters {
   origin: string
@@ -209,12 +221,22 @@ function RoundtripTable({ pairs, onOpen }: { pairs: RoundtripDealDto[]; onOpen: 
   )
 }
 
-export function Dashboard({ apiKeyPresent = true }: { apiKeyPresent?: boolean }) {
+export function Dashboard({
+  apiKeyPresent = true,
+  search = null,
+}: {
+  apiKeyPresent?: boolean
+  search?: SearchGeo | null
+}) {
   const [tab, setTab] = useState<'oneway' | 'roundtrip'>('oneway')
   const [f, setF] = useState<Filters>(DEFAULT_FILTERS)
   const [openDeal, setOpenDeal] = useState<OpenDeal | null>(null)
   // UI-only mode (no API key): rows stay plain — a details click would only dead-end.
   const onOpen = apiKeyPresent ? setOpenDeal : null
+  const geo = search ?? DEFAULT_GEO
+  // One-way rows include returns (origin = a destination airport), so the city
+  // filter offers both ends of the configured grid.
+  const cities = ['', ...new Set([...geo.origins, ...geo.destinations])]
 
   const onewayPath = useMemo(
     () =>
@@ -232,11 +254,13 @@ export function Dashboard({ apiKeyPresent = true }: { apiKeyPresent?: boolean })
   const roundtripPath = useMemo(
     () =>
       `/api/deals/roundtrip${qs({
-        origin: f.origin && f.origin !== 'NRT' && f.origin !== 'HND' ? f.origin : undefined,
+        // Roundtrip origin means the home city — a destination airport in the
+        // city filter doesn't narrow pairs.
+        origin: f.origin && !geo.destinations.includes(f.origin) ? f.origin : undefined,
         includeEstimates: f.includeEstimates ? undefined : 'false',
         limit: 100,
       })}`,
-    [f],
+    [f, geo.destinations],
   )
 
   const oneways = usePoll<OneWayDealsResponse>(onewayPath, 60_000)
@@ -255,7 +279,7 @@ export function Dashboard({ apiKeyPresent = true }: { apiKeyPresent?: boolean })
         <label>
           City
           <select value={f.origin} onChange={(e) => set({ origin: e.target.value })}>
-            {ORIGINS.map((o) => (
+            {cities.map((o) => (
               <option key={o} value={o}>
                 {o || 'any'}
               </option>
@@ -278,8 +302,8 @@ export function Dashboard({ apiKeyPresent = true }: { apiKeyPresent?: boolean })
               Direction
               <select value={f.direction} onChange={(e) => set({ direction: e.target.value })}>
                 <option value="">both</option>
-                <option value="outbound">to Tokyo</option>
-                <option value="return">from Tokyo</option>
+                <option value="outbound">to {geo.destinationLabel}</option>
+                <option value="return">from {geo.destinationLabel}</option>
               </select>
             </label>
             <label>

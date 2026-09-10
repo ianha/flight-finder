@@ -51,7 +51,7 @@ export async function searchCommand(
     console.log(JSON.stringify(outcome, null, 2))
   } else if (opts.dryRun) {
     if (outcome.digest) {
-      console.log(`\nSubject: ${subjectFor(outcome.digest)}\n`)
+      console.log(`\nSubject: ${subjectFor(outcome.digest, cfg.search.destinationLabel)}\n`)
       console.log(renderText(outcome.digest))
     } else {
       console.log('No new or improved deals this cycle.')

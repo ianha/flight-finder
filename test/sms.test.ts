@@ -143,3 +143,12 @@ test('SmsNotifier sends to every recipient and refuses when unconfigured', async
     /not configured/,
   )
 })
+
+test('renderSms header uses the configured destination label, ASCII-sanitized', () => {
+  const one = [{ deal: leg(0), reason: 'new' as const, detail: null }]
+  assert.match(renderSms(digestWith(one), 3), /^Tokyo J deals: /)
+  assert.match(renderSms(digestWith(one), 3, 'Osaka'), /^Osaka J deals: /)
+  // A label with non-GSM-7 characters must not break the ASCII-only guarantee.
+  const accented = renderSms(digestWith(one), 3, 'São Paulo')
+  assert.ok(!/[^\x20-\x7e\n]/.test(accented), `non-ASCII chars in: ${accented}`)
+})

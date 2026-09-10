@@ -53,6 +53,8 @@ export interface StatusResponse {
   scheduler: { intervalHours: number; nextRunAt: string | null } | null
   db: { path: string; availabilityRows: number; newestApiUpdatedAt: string | null }
   env: { seatsAeroApiKey: boolean; twilioCreds: boolean }
+  /** Search geography, so the frontend never hardcodes airports or "Tokyo". */
+  search: { origins: string[]; destinations: string[]; destinationLabel: string }
 }
 
 export interface CyclesResponse {

@@ -271,5 +271,10 @@ export function buildStatus(
       newestApiUpdatedAt: newest.m,
     },
     env,
+    search: {
+      origins: cfg.search.origins,
+      destinations: cfg.search.destinations,
+      destinationLabel: cfg.search.destinationLabel,
+    },
   }
 }

@@ -103,6 +103,8 @@ Every cycle (default: 2 h): two paginated cached-search calls cover the whole gr
 
 **Quota discipline:** the API allows 1,000 calls/day (midnight UTC reset). The app self-caps at `api.dailyCallBudget` (900), watches the `X-RateLimit-Remaining` header, skips detail lookups below `api.reserveCalls`, and skips whole cycles rather than exhausting the quota.
 
+**Destinations are configurable:** the app defaults to Tokyo (`search.destinations: [NRT, HND]`) but any destination set works — edit `search.destinations` (and `search.destinationLabel`, which renames the console and SMS header) in `config.yaml` or the web console. Avios **~est** pricing uses the API's route distance, so estimates keep working for other destinations; only the static distance fallback table is Tokyo-specific.
+
 **BA Avios estimates:** BA Avios is not a documented API source. Oneworld space (JAL/AA nonstops) is detected via the `american`/`alaska` sources and priced from static 2026 Avios distance-band charts (Qatar's chart is verified; BA's long-haul bands are ~+10% post-Dec-2025 community estimates). These deals are loudly flagged **~est** everywhere — JAL's 2026 fuel surcharges (≈US$370–440/sector) are *not* included. Run `probe-british` periodically to check whether direct BA data has become available.
 
 ## Deal details & booking

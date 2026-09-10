@@ -207,11 +207,18 @@ export function ConfigEditor() {
             onBlur={(e) => set((c) => (c.search.origins = textToCodes(e.target.value)))}
           />
         </Field>
-        <Field label="Tokyo airports" path="search.destinations" issues={issues} hint="comma-separated IATA codes">
+        <Field label="Destination airports" path="search.destinations" issues={issues} hint="comma-separated IATA codes (default: Tokyo — NRT, HND)">
           <input
             type="text"
             defaultValue={codesToText(d.search.destinations)}
             onBlur={(e) => set((c) => (c.search.destinations = textToCodes(e.target.value)))}
+          />
+        </Field>
+        <Field label="Destination label" path="search.destinationLabel" issues={issues} hint="name shown in the console and SMS header (e.g. Tokyo)">
+          <input
+            type="text"
+            defaultValue={d.search.destinationLabel}
+            onBlur={(e) => set((c) => (c.search.destinationLabel = e.target.value.trim() || 'Tokyo'))}
           />
         </Field>
         <Field label="Window start (days out)" path="search.window.startOffsetDays" issues={issues}>

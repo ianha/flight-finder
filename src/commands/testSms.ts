@@ -68,7 +68,7 @@ export async function testSmsCommand(g: GlobalOpts): Promise<void> {
     throw new Error('sms.to / sms.from are not configured — set them in config.yaml (E.164, e.g. +14165551234)')
   }
   const digest = cannedDigest()
-  log.info(`sending test SMS:\n---\n${renderSms(digest, cfg.sms.maxSegments)}\n---`)
+  log.info(`sending test SMS:\n---\n${renderSms(digest, cfg.sms.maxSegments, cfg.search.destinationLabel)}\n---`)
   const notifier = new SmsNotifier(cfg, {
     accountSid: secrets.twilioAccountSid,
     authToken: secrets.twilioAuthToken,

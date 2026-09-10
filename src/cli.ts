@@ -11,7 +11,7 @@ const program = new Command()
 program
   .name('deal-finder')
   .description(
-    `Tokyo business-class award deal finder.\n${ATTRIBUTION} (${ATTRIBUTION_URL}).`,
+    `Business-class award deal finder (Tokyo by default; see search.destinations).\n${ATTRIBUTION} (${ATTRIBUTION_URL}).`,
   )
   .option('-c, --config <path>', 'config file path', './config.yaml')
   .option('--verbose', 'verbose logging', false)

@@ -15,6 +15,9 @@ const TABS = [
 export function App() {
   const route = useHashRoute('deals')
   const status = usePoll<StatusResponse>('/api/status', 10_000)
+  // Fallbacks cover the first render before /api/status answers.
+  const search = status.data?.search ?? null
+  const destinationLabel = search?.destinationLabel ?? 'Tokyo'
 
   const inFlight = status.data?.cycleInFlight ?? null
   const lastStatus = status.data?.lastCycle?.status
@@ -32,7 +35,7 @@ export function App() {
       <header className="masthead">
         <div className="wordmark">
           <span className="dot" aria-hidden="true" />
-          <span>Tokyo&nbsp;J</span>
+          <span>{destinationLabel}&nbsp;J</span>
           <span className="sub">DEAL FINDER</span>
         </div>
         <nav className="nav">
@@ -49,13 +52,13 @@ export function App() {
       </header>
 
       {route === 'calendar' ? (
-        <Calendar />
+        <Calendar search={search} />
       ) : route === 'status' ? (
         <Status status={status} />
       ) : route === 'config' ? (
         <ConfigEditor />
       ) : (
-        <Dashboard apiKeyPresent={status.data?.env.seatsAeroApiKey ?? true} />
+        <Dashboard apiKeyPresent={status.data?.env.seatsAeroApiKey ?? true} search={search} />
       )}
 
       <footer className="attribution">

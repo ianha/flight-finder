@@ -13,8 +13,10 @@ api:
 search:
   # Cities to fly from (and return to). 3-letter IATA codes.
   origins: [YYZ, ORD, YVR, LAX]
-  # Tokyo airports.
+  # Destination airports (default: Tokyo).
   destinations: [NRT, HND]
+  # Name shown in the console and SMS header for the destination.
+  destinationLabel: Tokyo
   window:
     # Search window relative to "today", in days.
     startOffsetDays: 0

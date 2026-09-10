@@ -2,6 +2,7 @@ import { useMemo, useState } from 'react'
 import { usePoll, useApi } from '../hooks'
 import { qs, fmtPts, fmtDateShort } from '../api'
 import type { CalendarResponse, CalendarDay, OneWayDealsResponse } from '@shared/apiTypes'
+import { DEFAULT_GEO, type SearchGeo } from './Dashboard'
 
 const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
@@ -99,9 +100,10 @@ function DayDetail({ date, direction }: { date: string; direction: string }) {
   )
 }
 
-export function Calendar() {
+export function Calendar({ search = null }: { search?: SearchGeo | null }) {
   const [direction, setDirection] = useState<'outbound' | 'return'>('outbound')
   const [origin, setOrigin] = useState('')
+  const geo = search ?? DEFAULT_GEO
   const [selected, setSelected] = useState<string | null>(null)
 
   const path = `/api/availability/calendar${qs({
@@ -115,22 +117,22 @@ export function Calendar() {
     <div className="panel">
       <div className="panel-head">
         <span className="panel-title">
-          Cheapest business award by date · <b>{direction === 'outbound' ? 'to Tokyo' : 'from Tokyo'}</b>
+          Cheapest business award by date · <b>{direction === 'outbound' ? `to ${geo.destinationLabel}` : `from ${geo.destinationLabel}`}</b>
         </span>
       </div>
       <div className="filters">
         <div className="subtabs" style={{ marginLeft: 0 }}>
           <button className={direction === 'outbound' ? 'active' : ''} onClick={() => setDirection('outbound')}>
-            To Tokyo
+            To {geo.destinationLabel}
           </button>
           <button className={direction === 'return' ? 'active' : ''} onClick={() => setDirection('return')}>
-            From Tokyo
+            From {geo.destinationLabel}
           </button>
         </div>
         <label>
           City
           <select value={origin} onChange={(e) => setOrigin(e.target.value)}>
-            {['', 'YYZ', 'ORD', 'YVR', 'LAX'].map((o) => (
+            {['', ...geo.origins].map((o) => (
               <option key={o} value={o}>
                 {o || 'any'}
               </option>

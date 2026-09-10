@@ -28,6 +28,8 @@ export const configSchema = z
       .object({
         origins: z.array(airportCode).min(1).default(['YYZ', 'ORD', 'YVR', 'LAX']),
         destinations: z.array(airportCode).min(1).default(['NRT', 'HND']),
+        /** Friendly name for the destination, used in UI labels and the SMS header. */
+        destinationLabel: z.string().trim().min(1).max(40).default('Tokyo'),
         window: z
           .object({
             startOffsetDays: z.number().int().min(0).default(0),
