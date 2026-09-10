@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import { usePoll } from '../hooks'
 import { qs, fmtPts, fmtDateShort, ageOf } from '../api'
+import { DealDetail, type OpenDeal } from '../DealDetail'
 import type {
   OneWayDealsResponse,
   RoundtripDealsResponse,
@@ -73,7 +74,27 @@ function LegCells({ leg }: { leg: DealLegDto }) {
   )
 }
 
-function OnewayTable({ deals }: { deals: OneWayDealDto[] }) {
+/** Real button inside a cell (not role="button" on the row — that would break table semantics for screen readers). */
+function OpenDetailsCell({ label, onOpen }: { label: string; onOpen: (() => void) | null }) {
+  return (
+    <td className="row-open">
+      {onOpen && (
+        <button
+          className="row-open-btn"
+          aria-label={label}
+          onClick={(e) => {
+            e.stopPropagation()
+            onOpen()
+          }}
+        >
+          ›
+        </button>
+      )}
+    </td>
+  )
+}
+
+function OnewayTable({ deals, onOpen }: { deals: OneWayDealDto[]; onOpen: ((deal: OpenDeal) => void) | null }) {
   if (deals.length === 0) return <div className="empty">no qualifying one-ways in the current snapshot</div>
   return (
     <table className="board">
@@ -86,20 +107,30 @@ function OnewayTable({ deals }: { deals: OneWayDealDto[] }) {
           <th>Seats</th>
           <th>Airline</th>
           <th>Data</th>
+          <th className="row-open" aria-label="Details" />
         </tr>
       </thead>
       <tbody>
-        {deals.map((d) => (
-          <tr key={d.key}>
-            <LegCells leg={d} />
-          </tr>
-        ))}
+        {deals.map((d) => {
+          // Snapshot captured here, in the click scope — the drawer must never
+          // re-derive the leg from list state the poll keeps replacing.
+          const open = onOpen ? () => onOpen({ kind: 'oneway', dealKey: d.key, leg: d }) : null
+          return (
+            <tr key={d.key} className={open ? 'clickable' : ''} onClick={open ?? undefined}>
+              <LegCells leg={d} />
+              <OpenDetailsCell
+                label={`View details: ${d.origin} to ${d.destination}, ${d.program}, ${fmtPts(d.points)} pts`}
+                onOpen={open}
+              />
+            </tr>
+          )
+        })}
       </tbody>
     </table>
   )
 }
 
-function RoundtripTable({ pairs }: { pairs: RoundtripDealDto[] }) {
+function RoundtripTable({ pairs, onOpen }: { pairs: RoundtripDealDto[]; onOpen: ((deal: OpenDeal) => void) | null }) {
   if (pairs.length === 0) return <div className="empty">no qualifying roundtrip pairings in the current snapshot</div>
   return (
     <table className="board">
@@ -114,6 +145,7 @@ function RoundtripTable({ pairs }: { pairs: RoundtripDealDto[] }) {
           <th className="num">Points</th>
           <th>Airline</th>
           <th>Data</th>
+          <th className="row-open" aria-label="Details" />
         </tr>
       </thead>
       <tbody>
@@ -122,8 +154,20 @@ function RoundtripTable({ pairs }: { pairs: RoundtripDealDto[] }) {
             { label: 'out', leg: p.outbound },
             { label: 'back', leg: p.inbound },
           ]
+          // Either row of the rowSpan pair opens the pair's detail.
+          const open = onOpen
+            ? () =>
+                onOpen({
+                  kind: 'roundtrip',
+                  dealKey: p.key,
+                  outbound: p.outbound,
+                  inbound: p.inbound,
+                  totalPoints: p.totalPoints,
+                  stayNights: p.stayNights,
+                })
+            : null
           return legs.map(({ label, leg }, i) => (
-            <tr key={`${p.key}-${label}`}>
+            <tr key={`${p.key}-${label}`} className={open ? 'clickable' : ''} onClick={open ?? undefined}>
               {i === 0 ? (
                 <>
                   <td className="pts-total" rowSpan={2}>
@@ -153,6 +197,10 @@ function RoundtripTable({ pairs }: { pairs: RoundtripDealDto[] }) {
               <td>
                 <StaleAge iso={leg.apiUpdatedAt} />
               </td>
+              <OpenDetailsCell
+                label={`View details: roundtrip ${p.outbound.origin} to ${p.outbound.destination}, ${fmtPts(p.totalPoints)} pts total`}
+                onOpen={open}
+              />
             </tr>
           ))
         })}
@@ -161,9 +209,12 @@ function RoundtripTable({ pairs }: { pairs: RoundtripDealDto[] }) {
   )
 }
 
-export function Dashboard() {
+export function Dashboard({ apiKeyPresent = true }: { apiKeyPresent?: boolean }) {
   const [tab, setTab] = useState<'oneway' | 'roundtrip'>('oneway')
   const [f, setF] = useState<Filters>(DEFAULT_FILTERS)
+  const [openDeal, setOpenDeal] = useState<OpenDeal | null>(null)
+  // UI-only mode (no API key): rows stay plain — a details click would only dead-end.
+  const onOpen = apiKeyPresent ? setOpenDeal : null
 
   const onewayPath = useMemo(
     () =>
@@ -271,13 +322,18 @@ export function Dashboard() {
         oneways.error ? (
           <div className="error-box">{oneways.error}</div>
         ) : (
-          <OnewayTable deals={oneways.data?.deals ?? []} />
+          <OnewayTable deals={oneways.data?.deals ?? []} onOpen={onOpen} />
         )
       ) : roundtrips.error ? (
         <div className="error-box">{roundtrips.error}</div>
       ) : (
-        <RoundtripTable pairs={roundtrips.data?.pairs ?? []} />
+        <RoundtripTable pairs={roundtrips.data?.pairs ?? []} onOpen={onOpen} />
       )}
+
+      {/* Mounted above the row mapping and keyed by the deal: poll refreshes can
+          re-render the tables but can never remount or close an open drawer,
+          and opening a different row is a fresh mount by construction. */}
+      {openDeal && <DealDetail key={openDeal.dealKey} deal={openDeal} onClose={() => setOpenDeal(null)} />}
     </div>
   )
 }

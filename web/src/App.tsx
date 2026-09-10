@@ -55,7 +55,7 @@ export function App() {
       ) : route === 'config' ? (
         <ConfigEditor />
       ) : (
-        <Dashboard />
+        <Dashboard apiKeyPresent={status.data?.env.seatsAeroApiKey ?? true} />
       )}
 
       <footer className="attribution">
