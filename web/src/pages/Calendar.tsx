@@ -49,8 +49,8 @@ function buildMonths(days: CalendarDay[]): MonthCells[] {
   return months
 }
 
-function DayDetail({ date, direction }: { date: string; direction: string }) {
-  const path = `/api/deals/oneway${qs({ from: date, to: date, direction, maxPoints: 10_000_000, limit: 50, sort: 'points' })}`
+function DayDetail({ date, direction, home, dest }: { date: string; direction: string; home: string; dest: string }) {
+  const path = `/api/deals/oneway${qs({ from: date, to: date, direction, home, dest, maxPoints: 10_000_000, limit: 50, sort: 'points' })}`
   const detail = useApi<OneWayDealsResponse>(path)
   return (
     <div className="day-detail">
@@ -102,13 +102,16 @@ function DayDetail({ date, direction }: { date: string; direction: string }) {
 
 export function Calendar({ search = null }: { search?: SearchGeo | null }) {
   const [direction, setDirection] = useState<'outbound' | 'return'>('outbound')
-  const [origin, setOrigin] = useState('')
+  const [home, setHome] = useState('')
+  const [dest, setDest] = useState('')
   const geo = search ?? DEFAULT_GEO
   const [selected, setSelected] = useState<string | null>(null)
 
+  // The API's origin/destination are literal ends of the leg; the dropdowns are
+  // home city and destination airport, so they swap roles with the direction.
   const path = `/api/availability/calendar${qs({
     direction,
-    ...(direction === 'outbound' ? { origin } : { destination: origin }),
+    ...(direction === 'outbound' ? { origin: home, destination: dest } : { origin: dest, destination: home }),
   })}`
   const cal = usePoll<CalendarResponse>(path, 120_000)
   const months = useMemo(() => buildMonths(cal.data?.days ?? []), [cal.data])
@@ -130,9 +133,19 @@ export function Calendar({ search = null }: { search?: SearchGeo | null }) {
           </button>
         </div>
         <label>
-          City
-          <select value={origin} onChange={(e) => setOrigin(e.target.value)}>
+          Home
+          <select value={home} onChange={(e) => setHome(e.target.value)}>
             {['', ...geo.origins].map((o) => (
+              <option key={o} value={o}>
+                {o || 'any'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {geo.destinationLabel}
+          <select value={dest} onChange={(e) => setDest(e.target.value)}>
+            {['', ...geo.destinations].map((o) => (
               <option key={o} value={o}>
                 {o || 'any'}
               </option>
@@ -208,7 +221,7 @@ export function Calendar({ search = null }: { search?: SearchGeo | null }) {
         </>
       )}
 
-      {selected && <DayDetail date={selected} direction={direction} />}
+      {selected && <DayDetail date={selected} direction={direction} home={home} dest={dest} />}
     </div>
   )
 }

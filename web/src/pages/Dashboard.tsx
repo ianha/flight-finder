@@ -26,7 +26,8 @@ export const DEFAULT_GEO: SearchGeo = {
 }
 
 interface Filters {
-  origin: string
+  home: string
+  dest: string
   source: string
   direction: string
   directOnly: boolean
@@ -35,7 +36,8 @@ interface Filters {
 }
 
 const DEFAULT_FILTERS: Filters = {
-  origin: '',
+  home: '',
+  dest: '',
   source: '',
   direction: '',
   directOnly: false,
@@ -234,14 +236,12 @@ export function Dashboard({
   // UI-only mode (no API key): rows stay plain — a details click would only dead-end.
   const onOpen = apiKeyPresent ? setOpenDeal : null
   const geo = search ?? DEFAULT_GEO
-  // One-way rows include returns (origin = a destination airport), so the city
-  // filter offers both ends of the configured grid.
-  const cities = ['', ...new Set([...geo.origins, ...geo.destinations])]
 
   const onewayPath = useMemo(
     () =>
       `/api/deals/oneway${qs({
-        origin: f.origin,
+        home: f.home,
+        dest: f.dest,
         source: f.source,
         direction: f.direction,
         directOnly: f.directOnly ? 'true' : undefined,
@@ -254,13 +254,12 @@ export function Dashboard({
   const roundtripPath = useMemo(
     () =>
       `/api/deals/roundtrip${qs({
-        // Roundtrip origin means the home city — a destination airport in the
-        // city filter doesn't narrow pairs.
-        origin: f.origin && !geo.destinations.includes(f.origin) ? f.origin : undefined,
+        origin: f.home,
+        destination: f.dest,
         includeEstimates: f.includeEstimates ? undefined : 'false',
         limit: 100,
       })}`,
-    [f, geo.destinations],
+    [f],
   )
 
   const oneways = usePoll<OneWayDealsResponse>(onewayPath, 60_000)
@@ -277,9 +276,19 @@ export function Dashboard({
       </div>
       <div className="filters">
         <label>
-          City
-          <select value={f.origin} onChange={(e) => set({ origin: e.target.value })}>
-            {cities.map((o) => (
+          Home
+          <select value={f.home} onChange={(e) => set({ home: e.target.value })}>
+            {['', ...geo.origins].map((o) => (
+              <option key={o} value={o}>
+                {o || 'any'}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          {geo.destinationLabel}
+          <select value={f.dest} onChange={(e) => set({ dest: e.target.value })}>
+            {['', ...geo.destinations].map((o) => (
               <option key={o} value={o}>
                 {o || 'any'}
               </option>

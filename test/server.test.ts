@@ -410,3 +410,70 @@ test('api middleware rejects foreign Origin and non-loopback Host', async () => 
   })
   assert.equal(local.status, 200)
 })
+
+test('GET /api/deals/oneway home/dest filters are direction-aware', async () => {
+  const app = makeApp(seededDb(), null)
+
+  // home=YYZ: outbound legs FROM YYZ (a1) plus return legs TO YYZ (r1).
+  const home = (await (await app.request('/api/deals/oneway?home=YYZ')).json()) as OneWayDealsResponse
+  assert.equal(home.total, 2)
+  assert.ok(
+    home.deals.every((d) => (d.direction === 'outbound' ? d.origin : d.destination) === 'YYZ'),
+  )
+
+  // dest=HND: outbound legs TO HND (a2, p1); no return legs from HND seeded.
+  const dest = (await (await app.request('/api/deals/oneway?dest=HND')).json()) as OneWayDealsResponse
+  assert.equal(dest.total, 2)
+  assert.ok(dest.deals.every((d) => (d.direction === 'outbound' ? d.destination : d.origin) === 'HND'))
+
+  // Both ends: the YYZ↔NRT city pair in either direction.
+  const pairQ = (await (
+    await app.request('/api/deals/oneway?home=YYZ&dest=NRT')
+  ).json()) as OneWayDealsResponse
+  assert.equal(pairQ.total, 2) // a1 outbound YYZ→NRT + r1 return NRT→YYZ
+
+  const none = (await (
+    await app.request('/api/deals/oneway?home=YYZ&dest=HND')
+  ).json()) as OneWayDealsResponse
+  assert.equal(none.total, 0)
+})
+
+test('GET /api/deals/roundtrip destination filters the away airport (incl. open-jaws)', async () => {
+  const app = makeApp(seededDb(), null)
+  const all = (await (await app.request('/api/deals/roundtrip')).json()) as RoundtripDealsResponse
+
+  // HND: only pairs touching HND on the away side (LAX→HND out / NRT→YYZ back open-jaw).
+  const hnd = (await (
+    await app.request('/api/deals/roundtrip?destination=HND')
+  ).json()) as RoundtripDealsResponse
+  assert.ok(hnd.total >= 1)
+  assert.ok(hnd.total < all.total)
+  assert.ok(
+    hnd.pairs.every((p) => p.outbound.destination === 'HND' || p.inbound.origin === 'HND'),
+  )
+
+  // NRT matches pairs whose outbound lands NRT or whose inbound departs NRT.
+  const nrt = (await (
+    await app.request('/api/deals/roundtrip?destination=NRT')
+  ).json()) as RoundtripDealsResponse
+  assert.equal(nrt.total, all.total) // every seeded pair touches NRT on at least one leg
+
+  const kix = (await (
+    await app.request('/api/deals/roundtrip?destination=KIX')
+  ).json()) as RoundtripDealsResponse
+  assert.equal(kix.total, 0)
+})
+
+test('GET /api/availability/calendar filters by origin and destination together', async () => {
+  const app = makeApp(seededDb(), null)
+  const body = (await (
+    await app.request('/api/availability/calendar?direction=outbound&origin=LAX&destination=HND')
+  ).json()) as CalendarResponse
+  assert.equal(body.days.length, 1)
+  assert.equal(body.days[0]?.date, '2026-11-08')
+
+  const none = (await (
+    await app.request('/api/availability/calendar?direction=outbound&origin=YYZ&destination=HND')
+  ).json()) as CalendarResponse
+  assert.equal(none.days.length, 0)
+})

@@ -101,6 +101,8 @@ export function buildApp(deps: AppDeps): Hono {
       queryOneways(deps.db, deps.getConfig(), {
         ...(q('origin') ? { origin: q('origin')!.toUpperCase() } : {}),
         ...(q('destination') ? { destination: q('destination')!.toUpperCase() } : {}),
+        ...(q('home') ? { home: q('home')!.toUpperCase() } : {}),
+        ...(q('dest') ? { dest: q('dest')!.toUpperCase() } : {}),
         ...(q('source') ? { source: q('source')! } : {}),
         ...(parseDirection(q('direction')) ? { direction: parseDirection(q('direction'))! } : {}),
         ...(parseIntOpt(q('maxPoints')) !== undefined ? { maxPoints: parseIntOpt(q('maxPoints'))! } : {}),
@@ -122,6 +124,7 @@ export function buildApp(deps: AppDeps): Hono {
     return c.json(
       queryRoundtrips(deps.db, deps.getConfig(), {
         ...(q('origin') ? { origin: q('origin')!.toUpperCase() } : {}),
+        ...(q('destination') ? { destination: q('destination')!.toUpperCase() } : {}),
         ...(parseIntOpt(q('maxTotal')) !== undefined ? { maxTotal: parseIntOpt(q('maxTotal'))! } : {}),
         ...(parseIntOpt(q('minStay')) !== undefined ? { minStay: parseIntOpt(q('minStay'))! } : {}),
         ...(parseIntOpt(q('maxStay')) !== undefined ? { maxStay: parseIntOpt(q('maxStay'))! } : {}),

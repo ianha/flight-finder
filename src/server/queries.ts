@@ -50,6 +50,10 @@ function legToDto(leg: DealLeg): DealLegDto {
 export interface OneWayQuery {
   origin?: string
   destination?: string
+  /** Home-city filter, direction-aware: matches the origin of outbound legs and the destination of return legs. */
+  home?: string
+  /** Destination-airport filter, direction-aware: matches the destination of outbound legs and the origin of return legs. */
+  dest?: string
   source?: string
   direction?: Direction
   maxPoints?: number
@@ -75,6 +79,8 @@ export function queryOneways(
   let deals = detectOneways(getAllAvailability(db), effectiveCfg)
   if (q.origin) deals = deals.filter((d) => d.origin === q.origin)
   if (q.destination) deals = deals.filter((d) => d.destination === q.destination)
+  if (q.home) deals = deals.filter((d) => (d.direction === 'outbound' ? d.origin : d.destination) === q.home)
+  if (q.dest) deals = deals.filter((d) => (d.direction === 'outbound' ? d.destination : d.origin) === q.dest)
   if (q.source) deals = deals.filter((d) => d.source === q.source)
   if (q.direction) deals = deals.filter((d) => d.direction === q.direction)
   if (q.includeEstimates === false) deals = deals.filter((d) => !d.isEstimate)
@@ -90,6 +96,8 @@ export function queryOneways(
 
 export interface RoundtripQuery {
   origin?: string
+  /** Away-airport filter: matches the outbound's destination or the inbound's origin (covers destination-side open-jaws). */
+  destination?: string
   maxTotal?: number
   minStay?: number
   maxStay?: number
@@ -118,6 +126,11 @@ export function queryRoundtrips(
   }
   let pairs = detectRoundtrips(getAllAvailability(db), effectiveCfg)
   if (q.origin) pairs = pairs.filter((p) => p.outbound.origin === q.origin)
+  if (q.destination) {
+    pairs = pairs.filter(
+      (p) => p.outbound.destination === q.destination || p.inbound.origin === q.destination,
+    )
+  }
   if (q.includeEstimates === false) pairs = pairs.filter((p) => !p.isEstimate)
   const total = pairs.length
   return {
