@@ -32,10 +32,12 @@ function asciiSafe(s: string): string {
     .replace(/[^\x20-\x7e\n]/g, '?')
 }
 
+const SHORT_MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
+
 function shortDate(date: string): string {
-  // 2027-03-17 -> 3/17/27 (window spans a year, so the year digit matters).
+  // 2027-03-01 -> Mar/01/27 (window spans a year, so the year digit matters).
   const [y, m, d] = date.split('-')
-  return `${Number(m)}/${Number(d)}/${(y ?? '').slice(2)}`
+  return `${SHORT_MONTHS[Number(m) - 1]}/${d}/${(y ?? '').slice(2)}`
 }
 
 function shortReason(d: { reason: string; prevBestPoints?: number }): string {

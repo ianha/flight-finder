@@ -78,9 +78,9 @@ test('renderSms includes deal lines, reasons, roundtrips, and estimate markers',
     reason: 'new',
   }
   const body = renderSms(digestWith([ow, est], [rt], ['partial data']), 3)
-  assert.match(body, /YYZ-NRT 3\/1\/27 62\.5k Aeroplan NS x2 DROP was 75k/)
-  assert.match(body, /LAX-HND 3\/2\/27 ~77\.3k Avios est NS x2 NEW/)
-  assert.match(body, /RT 148k YYZ-NRT 3\/1\/27>3\/12\/27 11n NEW/)
+  assert.match(body, /YYZ-NRT Mar\/01\/27 62\.5k Aeroplan NS x2 DROP was 75k/)
+  assert.match(body, /LAX-HND Mar\/02\/27 ~77\.3k Avios est NS x2 NEW/)
+  assert.match(body, /RT 148k YYZ-NRT Mar\/01\/27>Mar\/12\/27 11n NEW/)
   assert.match(body, /notes: see console/)
 })
 

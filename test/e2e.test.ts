@@ -183,6 +183,53 @@ test('runCycle ignores off-grid records from the API (poller/console parity)', a
   assert.ok(!digest.oneways.some((o) => o.deal.destination === 'ICN'))
 })
 
+test('runCycle respects onewayMaxPoints threshold (config-honoring regression check)', async () => {
+  const opts = fixtureServerOptions()
+  // Add a deal that exceeds the default onewayMaxPoints (90k).
+  opts.searchPagesByOrigin[OUTBOUND_KEY] = [
+    searchPage([
+      ...opts.searchPagesByOrigin[OUTBOUND_KEY]![0]!.data,
+      makeAvailability({ id: 'over-cap', source: 'qatar', origin: 'YYZ', destination: 'NRT', date: '2026-11-05', jMileageCost: 95_000, jAirlines: 'QR' }),
+    ]),
+  ]
+  const server = await startMockServer(opts)
+  openServers.push(server)
+  const db = openDb(':memory:')
+  const notifier = new CaptureNotifier()
+
+  const outcome = await runCycle(deps(db, server.url, notifier), { trigger: 'manual' })
+  assert.equal(outcome.status, 'ok')
+  assert.equal(outcome.recordsFetched, 5) // stored including the over-cap row
+  const digest = notifier.digests[0]!
+  // The over-cap Qatar deal must not appear in the digest, even though it's stored.
+  assert.ok(!digest.oneways.some((o) => o.deal.points === 95_000 && o.deal.program.includes('Qatar')))
+})
+
+test('runCycle respects directOnly constraint (config-honoring regression check)', async () => {
+  const opts = fixtureServerOptions()
+  // Add a connecting (non-direct) deal that would be filtered out when directOnly is true.
+  opts.searchPagesByOrigin[OUTBOUND_KEY] = [
+    searchPage([
+      ...opts.searchPagesByOrigin[OUTBOUND_KEY]![0]!.data,
+      makeAvailability({ id: 'connecting', source: 'aeroplan', origin: 'ORD', destination: 'NRT', date: '2026-11-05', jMileageCost: 75_000, jDirect: false, jAirlines: 'AC+NH' }),
+    ]),
+  ]
+  const server = await startMockServer(opts)
+  openServers.push(server)
+  const db = openDb(':memory:')
+  const notifier = new CaptureNotifier()
+  const d = deps(db, server.url, notifier)
+  // Override config to enable directOnly.
+  d.cfg = parseConfig({ api: { baseUrl: server.url }, search: { directOnly: true } })
+
+  const outcome = await runCycle(d, { trigger: 'manual' })
+  assert.equal(outcome.status, 'ok')
+  assert.equal(outcome.recordsFetched, 5) // stored including the connecting row
+  const digest = notifier.digests[0]!
+  // The connecting deal must not appear when directOnly is true.
+  assert.ok(!digest.oneways.some((o) => o.deal.direct === false))
+})
+
 test('cycle aborts before any API call when the budget is exhausted', async () => {
   const server = await startMockServer(fixtureServerOptions())
   openServers.push(server)
