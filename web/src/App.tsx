@@ -1,5 +1,6 @@
 import { usePoll, useHashRoute } from './hooks'
 import type { StatusResponse } from '@shared/apiTypes'
+import { SCHEMA_DEFAULTS } from './statusDefaults'
 import { Dashboard } from './pages/Dashboard'
 import { Calendar } from './pages/Calendar'
 import { Status } from './pages/Status'
@@ -15,9 +16,9 @@ const TABS = [
 export function App() {
   const route = useHashRoute('deals')
   const status = usePoll<StatusResponse>('/api/status', 10_000)
-  // Fallbacks cover the first render before /api/status answers.
-  const search = status.data?.search ?? null
-  const destinationLabel = search?.destinationLabel ?? 'Tokyo'
+  // Fallback covers the first render before /api/status answers — the schema's
+  // own default, so it matches what a fresh config.yaml would actually produce.
+  const destinationLabel = (status.data?.search ?? SCHEMA_DEFAULTS.search).destinationLabel
 
   const inFlight = status.data?.cycleInFlight ?? null
   const lastStatus = status.data?.lastCycle?.status
@@ -52,13 +53,13 @@ export function App() {
       </header>
 
       {route === 'calendar' ? (
-        <Calendar search={search} />
+        <Calendar status={status.data} />
       ) : route === 'status' ? (
         <Status status={status} />
       ) : route === 'config' ? (
         <ConfigEditor />
       ) : (
-        <Dashboard apiKeyPresent={status.data?.env.seatsAeroApiKey ?? true} search={search} />
+        <Dashboard apiKeyPresent={status.data?.env.seatsAeroApiKey ?? true} status={status.data} />
       )}
 
       <footer className="attribution">

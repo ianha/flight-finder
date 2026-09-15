@@ -8,8 +8,8 @@ export class ApiError extends Error {
   }
 }
 
-export async function apiGet<T>(path: string): Promise<T> {
-  const res = await fetch(path)
+export async function apiGet<T>(path: string, signal?: AbortSignal): Promise<T> {
+  const res = await fetch(path, signal ? { signal } : undefined)
   const body = (await res.json().catch(() => null)) as unknown
   if (!res.ok) {
     const msg =

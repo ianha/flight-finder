@@ -153,7 +153,7 @@ export function ConfigEditor() {
       setDraft(structuredClone(ok.config))
       setFormRev((r) => r + 1)
       remote.refetch()
-      showToast('saved — applies from the next cycle')
+      showToast('saved — deals & calendar updated')
     } catch (e) {
       showToast(`save failed: ${(e as Error).message}`, true)
     } finally {
@@ -360,8 +360,8 @@ export function ConfigEditor() {
 
       </div>
       <div style={{ padding: '14px 16px', fontFamily: 'var(--mono)', fontSize: 11, color: 'var(--text-faint)' }}>
-        Saves preserve the comments in your config.yaml and apply from the next cycle — interval changes re-arm the
-        scheduler immediately.
+        Saves preserve the comments in your config.yaml. Deals and Calendar reflect the new settings immediately;
+        polling uses them from the next cycle — interval changes re-arm the scheduler at once.
       </div>
 
       {toast && <div className={`toast ${toast.err ? 'err' : ''}`}>{toast.msg}</div>}

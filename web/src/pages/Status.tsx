@@ -1,12 +1,7 @@
-import { useState } from 'react'
 import { usePoll, type ApiState } from '../hooks'
-import { apiPost, fmtPts, ageOf } from '../api'
-import type {
-  StatusResponse,
-  CyclesResponse,
-  AlertsResponse,
-  RunStartedResponse,
-} from '@shared/apiTypes'
+import { fmtPts, ageOf } from '../api'
+import { useRunNow } from '../useRunNow'
+import type { StatusResponse, CyclesResponse, AlertsResponse } from '@shared/apiTypes'
 
 function QuotaCard({ status }: { status: StatusResponse }) {
   const { used, budget, reserve, headerRemaining, dayUtc } = status.quota
@@ -49,30 +44,15 @@ function SchedulerCard({
   status: StatusResponse
   refetchStatus: () => void
 }) {
-  const [toast, setToast] = useState<{ msg: string; err: boolean } | null>(null)
   const inFlight = status.cycleInFlight !== null
-
-  const runNow = async () => {
-    try {
-      await apiPost<RunStartedResponse>('/api/run')
-      setToast({ msg: 'cycle started', err: false })
-    } catch (e) {
-      const err = e as { status?: number; message: string }
-      setToast({
-        msg: err.status === 409 ? 'a cycle is already running' : `failed: ${err.message}`,
-        err: true,
-      })
-    }
-    refetchStatus()
-    setTimeout(() => setToast(null), 3500)
-  }
+  const { run, busy, toast } = useRunNow(refetchStatus)
 
   return (
     <div className="panel">
       <div className="panel-head">
         <span className="panel-title">Scheduler</span>
         <div style={{ marginLeft: 'auto' }}>
-          <button className="action" onClick={runNow} disabled={inFlight || !status.scheduler}>
+          <button className="action" onClick={run} disabled={busy || inFlight || !status.scheduler}>
             {inFlight ? 'running…' : 'Run now'}
           </button>
         </div>

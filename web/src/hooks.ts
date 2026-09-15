@@ -41,8 +41,16 @@ export function useApi<T>(path: string): ApiState<T> {
   return { data, error, loading, refetch }
 }
 
-/** Fetch on an interval (background refresh keeps stale data visible). */
-export function usePoll<T>(path: string, intervalMs: number): ApiState<T> {
+/**
+ * Fetch on an interval (background refresh keeps stale data visible).
+ * `revision`, when given, joins `path` in the effect deps — a config change
+ * (surfaced via /api/status's configRevision) triggers an immediate refetch
+ * and restarts the interval, without waiting out the rest of the current
+ * `intervalMs`. Pass a primitive string, never an object — an object that is
+ * freshly parsed on every status poll would itself retrigger this effect and
+ * turn `intervalMs` polling into 10s polling.
+ */
+export function usePoll<T>(path: string, intervalMs: number, revision?: string): ApiState<T> {
   const [data, setData] = useState<T | null>(null)
   const [error, setError] = useState<string | null>(null)
   const [loading, setLoading] = useState(true)
@@ -51,28 +59,32 @@ export function usePoll<T>(path: string, intervalMs: number): ApiState<T> {
 
   useEffect(() => {
     let alive = true
+    let seq = 0
+    const controller = new AbortController()
     const fetchOnce = () => {
-      apiGet<T>(path)
+      const mySeq = ++seq
+      apiGet<T>(path, controller.signal)
         .then((d) => {
-          if (!alive) return
+          if (!alive || mySeq !== seq) return
           setData(d)
           setError(null)
         })
         .catch((e: Error) => {
-          if (!alive) return
+          if (e.name === 'AbortError' || !alive || mySeq !== seq) return
           setError(e.message)
         })
         .finally(() => {
-          if (alive) setLoading(false)
+          if (alive && mySeq === seq) setLoading(false)
         })
     }
     fetchOnce()
     timer.current = setInterval(fetchOnce, intervalMs)
     return () => {
       alive = false
+      controller.abort()
       if (timer.current) clearInterval(timer.current)
     }
-  }, [path, intervalMs, tick])
+  }, [path, intervalMs, tick, revision])
 
   const refetch = useCallback(() => setTick((t) => t + 1), [])
   return { data, error, loading, refetch }

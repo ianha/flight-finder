@@ -1,16 +1,21 @@
 import { useMemo, useState } from 'react'
 import { usePoll, useApi } from '../hooks'
 import { qs, fmtPts, fmtDateShort } from '../api'
-import type { CalendarResponse, CalendarDay, OneWayDealsResponse } from '@shared/apiTypes'
-import { DEFAULT_GEO, type SearchGeo } from './Dashboard'
+import { SCHEMA_DEFAULTS } from '../statusDefaults'
+import type { CalendarResponse, CalendarDay, OneWayDealsResponse, StatusResponse } from '@shared/apiTypes'
 
 const DOW = ['S', 'M', 'T', 'W', 'T', 'F', 'S']
 
-// Price bands relative to the one-way threshold: hot (<75k), good (75-90k), over (>=90k).
-function bandOf(day: CalendarDay): string {
+// Price bands relative to the configured one-way cap: hot (<80% of cap), good
+// (80-100%), over (>=cap). The 90k default cap reproduces the original fixed
+// 75k/90k bands (75k = 90k * 0.8333, close enough that the legend text below
+// derives from the SAME cap rather than repeating a second hardcoded number).
+const HOT_BAND_RATIO = 0.8333
+
+function bandOf(day: CalendarDay, cap: number): string {
   if (day.minPoints === null) return ''
-  if (day.minPoints < 75_000) return 'band-hot'
-  if (day.minPoints < 90_000) return 'band-good'
+  if (day.minPoints < cap * HOT_BAND_RATIO) return 'band-hot'
+  if (day.minPoints < cap) return 'band-good'
   return 'band-over'
 }
 
@@ -49,7 +54,19 @@ function buildMonths(days: CalendarDay[]): MonthCells[] {
   return months
 }
 
-function DayDetail({ date, direction, home, dest }: { date: string; direction: string; home: string; dest: string }) {
+function DayDetail({
+  date,
+  direction,
+  home,
+  dest,
+  onewayMaxPoints,
+}: {
+  date: string
+  direction: string
+  home: string
+  dest: string
+  onewayMaxPoints: number
+}) {
   const path = `/api/deals/oneway${qs({ from: date, to: date, direction, home, dest, maxPoints: 10_000_000, limit: 50, sort: 'points' })}`
   const detail = useApi<OneWayDealsResponse>(path)
   return (
@@ -86,7 +103,7 @@ function DayDetail({ date, direction, home, dest }: { date: string; direction: s
                 <td>
                   {d.program} {d.isEstimate && <span className="badge est">~est</span>}
                 </td>
-                <td className={d.points >= 90_000 ? 'pts over' : 'pts'}>{fmtPts(d.points)}</td>
+                <td className={d.points >= onewayMaxPoints ? 'pts over' : 'pts'}>{fmtPts(d.points)}</td>
                 <td className="dim">{d.seats === null || d.seats === 0 ? '—' : d.seats}</td>
                 <td className="dim">
                   {d.airlines || '?'} {d.direct ? <span className="badge direct">nonstop</span> : null}
@@ -100,20 +117,24 @@ function DayDetail({ date, direction, home, dest }: { date: string; direction: s
   )
 }
 
-export function Calendar({ search = null }: { search?: SearchGeo | null }) {
+export function Calendar({ status = null }: { status?: StatusResponse | null }) {
   const [direction, setDirection] = useState<'outbound' | 'return'>('outbound')
   const [home, setHome] = useState('')
   const [dest, setDest] = useState('')
-  const geo = search ?? DEFAULT_GEO
+  const geo = status?.search ?? SCHEMA_DEFAULTS.search
+  const cap = (status?.thresholds ?? SCHEMA_DEFAULTS.thresholds).onewayMaxPoints
+  const ready = status !== null
   const [selected, setSelected] = useState<string | null>(null)
 
   // The API's origin/destination are literal ends of the leg; the dropdowns are
   // home city and destination airport, so they swap roles with the direction.
+  const homeSel = geo.origins.includes(home) ? home : ''
+  const destSel = geo.destinations.includes(dest) ? dest : ''
   const path = `/api/availability/calendar${qs({
     direction,
-    ...(direction === 'outbound' ? { origin: home, destination: dest } : { origin: dest, destination: home }),
+    ...(direction === 'outbound' ? { origin: homeSel, destination: destSel } : { origin: destSel, destination: homeSel }),
   })}`
-  const cal = usePoll<CalendarResponse>(path, 120_000)
+  const cal = usePoll<CalendarResponse>(path, 120_000, status?.configRevision)
   const months = useMemo(() => buildMonths(cal.data?.days ?? []), [cal.data])
 
   return (
@@ -134,7 +155,7 @@ export function Calendar({ search = null }: { search?: SearchGeo | null }) {
         </div>
         <label>
           Home
-          <select value={home} onChange={(e) => setHome(e.target.value)}>
+          <select value={homeSel} disabled={!ready} onChange={(e) => setHome(e.target.value)}>
             {['', ...geo.origins].map((o) => (
               <option key={o} value={o}>
                 {o || 'any'}
@@ -144,7 +165,7 @@ export function Calendar({ search = null }: { search?: SearchGeo | null }) {
         </label>
         <label>
           {geo.destinationLabel}
-          <select value={dest} onChange={(e) => setDest(e.target.value)}>
+          <select value={destSel} disabled={!ready} onChange={(e) => setDest(e.target.value)}>
             {['', ...geo.destinations].map((o) => (
               <option key={o} value={o}>
                 {o || 'any'}
@@ -156,8 +177,12 @@ export function Calendar({ search = null }: { search?: SearchGeo | null }) {
 
       {cal.error ? (
         <div className="error-box">{cal.error}</div>
+      ) : !cal.data ? (
+        <div className="empty">loading…</div>
+      ) : cal.data.availabilityInScope === 0 ? (
+        <div className="empty">no availability fetched yet for this configuration — run a cycle first</div>
       ) : months.length === 0 ? (
-        <div className="empty">no availability data yet — run a cycle first</div>
+        <div className="empty">no priced availability in this window</div>
       ) : (
         <>
           <div className="cal-months">
@@ -178,7 +203,7 @@ export function Calendar({ search = null }: { search?: SearchGeo | null }) {
                     return (
                       <div
                         key={day.date}
-                        className={`cal-day ${bandOf(day)} ${day.minPointsIsEstimate ? 'est-marker' : ''} ${
+                        className={`cal-day ${bandOf(day, cap)} ${day.minPointsIsEstimate ? 'est-marker' : ''} ${
                           selected === day.date ? 'selected' : ''
                         }`}
                         title={
@@ -202,15 +227,15 @@ export function Calendar({ search = null }: { search?: SearchGeo | null }) {
           <div className="cal-legend">
             <span>
               <span className="chip" style={{ background: 'rgba(61,220,132,0.28)' }} />
-              under 75k
+              under {kFmt(cap * HOT_BAND_RATIO)}
             </span>
             <span>
               <span className="chip" style={{ background: 'rgba(61,220,132,0.13)' }} />
-              75–90k
+              {kFmt(cap * HOT_BAND_RATIO)}–{kFmt(cap)}
             </span>
             <span>
               <span className="chip" style={{ background: 'rgba(255,255,255,0.045)' }} />
-              90k and up
+              {kFmt(cap)} and up
             </span>
             <span>
               <span className="chip" style={{ outline: '1px dashed var(--amber-dim)', outlineOffset: -1 }} />
@@ -221,7 +246,9 @@ export function Calendar({ search = null }: { search?: SearchGeo | null }) {
         </>
       )}
 
-      {selected && <DayDetail date={selected} direction={direction} home={home} dest={dest} />}
+      {selected && (
+        <DayDetail date={selected} direction={direction} home={homeSel} dest={destSel} onewayMaxPoints={cap} />
+      )}
     </div>
   )
 }

@@ -1,36 +1,26 @@
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import { usePoll } from '../hooks'
 import { qs, fmtPts, fmtDateShort, ageOf } from '../api'
 import { DealDetail, type OpenDeal } from '../DealDetail'
+import { useRunNow } from '../useRunNow'
+import { SCHEMA_DEFAULTS } from '../statusDefaults'
+import { ESTIMATE_SOURCE_KEY } from '@shared/constants'
 import type {
   OneWayDealsResponse,
   RoundtripDealsResponse,
   DealLegDto,
   OneWayDealDto,
   RoundtripDealDto,
+  StatusResponse,
 } from '@shared/apiTypes'
-
-const SOURCES = ['', 'aeroplan', 'flyingblue', 'qatar', 'american', 'alaska', 'british']
-
-export interface SearchGeo {
-  origins: string[]
-  destinations: string[]
-  destinationLabel: string
-}
-
-/** Matches the configSchema defaults — covers the first render before /api/status answers. */
-export const DEFAULT_GEO: SearchGeo = {
-  origins: ['YYZ', 'ORD', 'YVR', 'LAX'],
-  destinations: ['NRT', 'HND'],
-  destinationLabel: 'Tokyo',
-}
 
 interface Filters {
   home: string
   dest: string
   source: string
   direction: string
-  directOnly: boolean
+  /** null = follow the config default; a boolean is an explicit per-session override. */
+  directOnly: boolean | null
   includeEstimates: boolean
   maxPoints: string
 }
@@ -40,7 +30,7 @@ const DEFAULT_FILTERS: Filters = {
   dest: '',
   source: '',
   direction: '',
-  directOnly: false,
+  directOnly: null,
   includeEstimates: true,
   maxPoints: '',
 }
@@ -144,7 +134,15 @@ function OnewayTable({ deals, onOpen }: { deals: OneWayDealDto[]; onOpen: ((deal
   )
 }
 
-function RoundtripTable({ pairs, onOpen }: { pairs: RoundtripDealDto[]; onOpen: ((deal: OpenDeal) => void) | null }) {
+function RoundtripTable({
+  pairs,
+  onOpen,
+  onewayMaxPoints,
+}: {
+  pairs: RoundtripDealDto[]
+  onOpen: ((deal: OpenDeal) => void) | null
+  onewayMaxPoints: number
+}) {
   if (pairs.length === 0) return <div className="empty">no qualifying roundtrip pairings in the current snapshot</div>
   return (
     <table className="board">
@@ -206,7 +204,7 @@ function RoundtripTable({ pairs, onOpen }: { pairs: RoundtripDealDto[]; onOpen: 
               </td>
               <td className="dim">{fmtDateShort(leg.date)}</td>
               <td>{leg.program}</td>
-              <td className={leg.points >= 90_000 ? 'pts over' : 'pts'}>{fmtPts(leg.points)}</td>
+              <td className={leg.points >= onewayMaxPoints ? 'pts over' : 'pts'}>{fmtPts(leg.points)}</td>
               <td className="dim">{leg.airlines || '?'}</td>
               <td>
                 <StaleAge iso={leg.apiUpdatedAt} />
@@ -223,49 +221,116 @@ function RoundtripTable({ pairs, onOpen }: { pairs: RoundtripDealDto[]; onOpen: 
   )
 }
 
+/**
+ * Shown when the current configuration's geography/window has zero fetched
+ * availability rows (availabilityInScope === 0) — distinct from "nothing
+ * qualifies": the console hasn't looked yet, not that nothing is there.
+ */
+function NoScopedDataEmpty({ status }: { status: StatusResponse | null }) {
+  const { run, busy, toast } = useRunNow()
+  const hasApiKey = status?.env.seatsAeroApiKey ?? true
+  const scheduler = status?.scheduler ?? null
+  const inFlight = status?.cycleInFlight != null
+  return (
+    <div className="empty empty-action" role="status">
+      <div>no availability fetched yet for this configuration</div>
+      <div className="dim">
+        {scheduler ? (
+          scheduler.nextRunAt ? (
+            <>
+              next cycle{' '}
+              <time dateTime={scheduler.nextRunAt}>
+                {new Date(scheduler.nextRunAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}
+              </time>
+            </>
+          ) : (
+            'next cycle pending'
+          )
+        ) : hasApiKey ? (
+          'scheduler not running (CLI mode)'
+        ) : (
+          'disabled — no API key'
+        )}
+      </div>
+      {hasApiKey && scheduler && (
+        <button className="action" onClick={run} disabled={busy || inFlight}>
+          {inFlight ? 'running…' : busy ? 'starting…' : 'Run now'}
+        </button>
+      )}
+      {toast && <div className={`toast ${toast.err ? 'err' : ''}`}>{toast.msg}</div>}
+    </div>
+  )
+}
+
 export function Dashboard({
   apiKeyPresent = true,
-  search = null,
+  status = null,
 }: {
   apiKeyPresent?: boolean
-  search?: SearchGeo | null
+  status?: StatusResponse | null
 }) {
   const [tab, setTab] = useState<'oneway' | 'roundtrip'>('oneway')
   const [f, setF] = useState<Filters>(DEFAULT_FILTERS)
   const [openDeal, setOpenDeal] = useState<OpenDeal | null>(null)
   // UI-only mode (no API key): rows stay plain — a details click would only dead-end.
   const onOpen = apiKeyPresent ? setOpenDeal : null
-  const geo = search ?? DEFAULT_GEO
+  // Stable identity: DealDetail's dialog-plumbing effect depends on onClose —
+  // a fresh function every render (the old inline arrow) would tear it down and
+  // rebuild it (re-adding the keydown listener, re-grabbing focus) on every
+  // status/deal poll tick, stealing focus from wherever the user tabbed to.
+  const closeDrawer = useCallback(() => setOpenDeal(null), [])
 
+  const ready = status !== null
+  const geo = status?.search ?? SCHEMA_DEFAULTS.search
+  const thresholds = status?.thresholds ?? SCHEMA_DEFAULTS.thresholds
+
+  // Effective filters are DERIVED, not synced with an effect: a selection the
+  // current config no longer offers falls back to "any" instead of filtering
+  // on a ghost airport/program. The nonstop checkbox is disabled until ready,
+  // so a user can never lock in an override before the real config default is
+  // known.
+  const programOptions = useMemo(
+    () => [...geo.sources, ...(geo.estimatesEnabled ? [ESTIMATE_SOURCE_KEY] : [])],
+    [geo.sources, geo.estimatesEnabled],
+  )
+  const home = geo.origins.includes(f.home) ? f.home : ''
+  const dest = geo.destinations.includes(f.dest) ? f.dest : ''
+  const source = programOptions.includes(f.source) ? f.source : ''
+  const directOnly = f.directOnly ?? geo.directOnly
+  const directOnlyOverridden = f.directOnly !== null
+
+  const set = (patch: Partial<Filters>) => setF((cur) => ({ ...cur, ...patch }))
+
+  // Paths depend only on primitives derived above (never on `geo`/`status`,
+  // which are new objects every 10s status poll and would otherwise reset the
+  // 60s interval on every tick).
   const onewayPath = useMemo(
     () =>
       `/api/deals/oneway${qs({
-        home: f.home,
-        dest: f.dest,
-        source: f.source,
+        home,
+        dest,
+        source,
         direction: f.direction,
-        directOnly: f.directOnly ? 'true' : undefined,
+        directOnly: f.directOnly ?? undefined,
         includeEstimates: f.includeEstimates ? undefined : 'false',
         maxPoints: f.maxPoints,
         limit: 200,
       })}`,
-    [f],
+    [home, dest, source, f.direction, f.directOnly, f.includeEstimates, f.maxPoints],
   )
   const roundtripPath = useMemo(
     () =>
       `/api/deals/roundtrip${qs({
-        origin: f.home,
-        destination: f.dest,
+        origin: home,
+        destination: dest,
         includeEstimates: f.includeEstimates ? undefined : 'false',
         limit: 100,
       })}`,
-    [f],
+    [home, dest, f.includeEstimates],
   )
 
-  const oneways = usePoll<OneWayDealsResponse>(onewayPath, 60_000)
-  const roundtrips = usePoll<RoundtripDealsResponse>(roundtripPath, 60_000)
-
-  const set = (patch: Partial<Filters>) => setF((cur) => ({ ...cur, ...patch }))
+  const oneways = usePoll<OneWayDealsResponse>(onewayPath, 60_000, status?.configRevision)
+  const roundtrips = usePoll<RoundtripDealsResponse>(roundtripPath, 60_000, status?.configRevision)
 
   return (
     <div className="panel">
@@ -277,7 +342,7 @@ export function Dashboard({
       <div className="filters">
         <label>
           Home
-          <select value={f.home} onChange={(e) => set({ home: e.target.value })}>
+          <select value={home} disabled={!ready} onChange={(e) => set({ home: e.target.value })}>
             {['', ...geo.origins].map((o) => (
               <option key={o} value={o}>
                 {o || 'any'}
@@ -287,7 +352,7 @@ export function Dashboard({
         </label>
         <label>
           {geo.destinationLabel}
-          <select value={f.dest} onChange={(e) => set({ dest: e.target.value })}>
+          <select value={dest} disabled={!ready} onChange={(e) => set({ dest: e.target.value })}>
             {['', ...geo.destinations].map((o) => (
               <option key={o} value={o}>
                 {o || 'any'}
@@ -297,10 +362,11 @@ export function Dashboard({
         </label>
         <label>
           Program
-          <select value={f.source} onChange={(e) => set({ source: e.target.value })}>
-            {SOURCES.map((s) => (
+          <select value={source} disabled={!ready} onChange={(e) => set({ source: e.target.value })}>
+            <option value="">any</option>
+            {programOptions.map((s) => (
               <option key={s} value={s}>
-                {s || 'any'}
+                {s === ESTIMATE_SOURCE_KEY ? 'avios ~est' : s}
               </option>
             ))}
           </select>
@@ -321,7 +387,7 @@ export function Dashboard({
                 type="number"
                 step={5000}
                 min={0}
-                placeholder="90000"
+                placeholder={String(thresholds.onewayMaxPoints)}
                 value={f.maxPoints}
                 onChange={(e) => set({ maxPoints: e.target.value })}
                 style={{ width: 90 }}
@@ -330,17 +396,32 @@ export function Dashboard({
           </>
         )}
         <label>
-          <input type="checkbox" checked={f.directOnly} onChange={(e) => set({ directOnly: e.target.checked })} />
-          nonstop only
-        </label>
-        <label>
           <input
             type="checkbox"
-            checked={f.includeEstimates}
-            onChange={(e) => set({ includeEstimates: e.target.checked })}
+            checked={directOnly}
+            disabled={!ready}
+            onChange={(e) =>
+              set({ directOnly: e.target.checked === geo.directOnly ? null : e.target.checked })
+            }
+            aria-describedby={directOnlyOverridden ? 'nonstop-override' : undefined}
           />
-          include estimates
+          nonstop only{' '}
+          {directOnlyOverridden && (
+            <span id="nonstop-override" className="faint">
+              override · config {geo.directOnly ? 'on' : 'off'}
+            </span>
+          )}
         </label>
+        {geo.estimatesEnabled && (
+          <label>
+            <input
+              type="checkbox"
+              checked={f.includeEstimates}
+              onChange={(e) => set({ includeEstimates: e.target.checked })}
+            />
+            include estimates
+          </label>
+        )}
         <div className="subtabs">
           <button className={tab === 'oneway' ? 'active' : ''} onClick={() => setTab('oneway')}>
             One-ways
@@ -354,19 +435,27 @@ export function Dashboard({
       {tab === 'oneway' ? (
         oneways.error ? (
           <div className="error-box">{oneways.error}</div>
+        ) : !oneways.data ? (
+          <div className="empty">loading…</div>
+        ) : oneways.data.availabilityInScope === 0 ? (
+          <NoScopedDataEmpty status={status} />
         ) : (
-          <OnewayTable deals={oneways.data?.deals ?? []} onOpen={onOpen} />
+          <OnewayTable deals={oneways.data.deals} onOpen={onOpen} />
         )
       ) : roundtrips.error ? (
         <div className="error-box">{roundtrips.error}</div>
+      ) : !roundtrips.data ? (
+        <div className="empty">loading…</div>
+      ) : roundtrips.data.availabilityInScope === 0 ? (
+        <NoScopedDataEmpty status={status} />
       ) : (
-        <RoundtripTable pairs={roundtrips.data?.pairs ?? []} onOpen={onOpen} />
+        <RoundtripTable pairs={roundtrips.data.pairs} onOpen={onOpen} onewayMaxPoints={thresholds.onewayMaxPoints} />
       )}
 
       {/* Mounted above the row mapping and keyed by the deal: poll refreshes can
           re-render the tables but can never remount or close an open drawer,
           and opening a different row is a fresh mount by construction. */}
-      {openDeal && <DealDetail key={openDeal.dealKey} deal={openDeal} onClose={() => setOpenDeal(null)} />}
+      {openDeal && <DealDetail key={openDeal.dealKey} deal={openDeal} onClose={closeDrawer} />}
     </div>
   )
 }
