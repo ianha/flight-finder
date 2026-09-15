@@ -49,7 +49,7 @@ One user (the owner), one always-on Mac. The web server binds to 127.0.0.1 only;
 - FR-2.4 Every SMS carries a verify-before-booking caveat and seats.aero attribution; full detail lives in the web console.
 
 ### FR-3 Web viewing
-- FR-3.1 Dashboard listing current qualifying one-ways and roundtrip pairings with filtering (origin, destination, program, direct-only, include-estimates, max points) and sorting.
+- FR-3.1 Dashboard listing current qualifying one-ways and roundtrip pairings with filtering (origin, destination, program, direct-only, include-estimates, max points) and sorting. The dashboard reflects the *current* configuration (geography, date window, programs, thresholds); rows outside it are never listed even if present in the database.
 - FR-3.2 Calendar view: per-date minimum business points for the next 12 months, per direction.
 - FR-3.3 Status view: API quota usage, scheduler state, cycle history, recent alerts, secret-presence indicators.
 - FR-3.4 A visible "cycle running" indicator and seats.aero attribution on every screen.
@@ -58,7 +58,7 @@ One user (the owner), one always-on Mac. The web server binds to 127.0.0.1 only;
 ### FR-4 Web configuration
 - FR-4.1 View the full effective configuration (defaults applied, secrets excluded) in a form.
 - FR-4.2 Edit and save configuration with client- and server-side validation from the same schema; per-field inline errors.
-- FR-4.3 Saves preserve hand-written YAML comments and apply without restart (next cycle; polling-interval changes re-arm the scheduler immediately).
+- FR-4.3 Saves preserve hand-written YAML comments and apply without restart. Read views (Dashboard, Calendar) apply the new configuration immediately; polling picks it up from the next cycle (polling-interval changes re-arm the scheduler immediately).
 - FR-4.4 `db.path` and `server.port` are visible but read-only in the UI; secrets are shown only as present/absent.
 
 ### FR-5 Operations

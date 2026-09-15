@@ -138,6 +138,8 @@ Without `SEATS_AERO_API_KEY`, `serve` still boots in UI-only mode (console + con
 
 - Each tab renders; deal filters change the table; estimate badges show on proxy deals
 - Calendar day click opens the day panel; bands match the legend
+- Change `search.origins`/`search.destinations`/`search.directOnly`/`thresholds.onewayMaxPoints` in Config → Save: Deals and Calendar show only the new geography and defaults within ~10s, with no reload; a Home/destination/Program selection the new config no longer offers resets to "any" instead of an unexplained empty table
+- A geography/window change with nothing fetched yet shows "no availability fetched yet for this configuration" with the next scheduled run and a Run-now button, distinct from "nothing qualifies"
 - Config: edit → Save → toast → `config.yaml` diff shows the change *and* your comments intact; invalid input shows an inline field error and blocks save; interval edit changes "next scheduled run" on Status
 - Run Now disables while a cycle runs and the history gains a `manual` row
 - `curl http://<your-lan-ip>:8787/api/health` from another machine fails (loopback-only)
