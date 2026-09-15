@@ -2,8 +2,13 @@ import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs'
 import { parse, parseDocument, Document } from 'yaml'
 import { z } from 'zod'
 import { configSchema, type AppConfig } from './shared/configSchema.js'
-import { HARD_MAX_WINDOW_DAYS } from './shared/constants.js'
 import { log } from './log.js'
+import { deriveWindow } from './deals/scope.js'
+
+// Re-exported for existing importers (src/poll.ts, src/commands/probeBritish.ts,
+// test/config.test.ts) — the implementation lives in deals/scope.ts, next to the
+// isInScope predicate it must stay consistent with.
+export { deriveWindow }
 
 export class ConfigError extends Error {
   constructor(
@@ -43,32 +48,6 @@ export function loadConfig(path: string): AppConfig {
     throw new ConfigError(`Could not parse ${path}: ${(err as Error).message}`)
   }
   return parseConfig(raw)
-}
-
-function fmtLocalDate(d: Date): string {
-  const y = d.getFullYear()
-  const m = String(d.getMonth() + 1).padStart(2, '0')
-  const day = String(d.getDate()).padStart(2, '0')
-  return `${y}-${m}-${day}`
-}
-
-function addDays(d: Date, days: number): Date {
-  const out = new Date(d)
-  out.setDate(out.getDate() + days)
-  return out
-}
-
-/** Derive the concrete search window (local calendar dates) from relative offsets. */
-export function deriveWindow(
-  cfg: AppConfig,
-  today: Date = new Date(),
-): { startDate: string; endDate: string } {
-  const startOffset = Math.min(cfg.search.window.startOffsetDays, HARD_MAX_WINDOW_DAYS)
-  const endOffset = Math.min(cfg.search.window.endOffsetDays, HARD_MAX_WINDOW_DAYS)
-  return {
-    startDate: fmtLocalDate(addDays(today, startOffset)),
-    endDate: fmtLocalDate(addDays(today, Math.max(endOffset, startOffset))),
-  }
 }
 
 function isPlainObject(v: unknown): v is Record<string, unknown> {

@@ -17,6 +17,10 @@ const MIGRATIONS: string[] = [
     destination             TEXT NOT NULL,
     date                    TEXT NOT NULL,
     id                      TEXT NOT NULL,
+    -- The leg AS FETCHED BY THE LAST CYCLE that saw this row, not geometry —
+    -- upsertAvailability rewrites it on every conflict. A row a current config
+    -- no longer fetches keeps a stale direction; see deals/scope.ts#isInScope,
+    -- which relies on exactly that to hide rows outside the live configuration.
     direction               TEXT NOT NULL,
     j_available             INTEGER NOT NULL,
     j_mileage_cost          INTEGER,
@@ -198,9 +202,16 @@ export function getAvailabilitySeenAt(db: Db, seenAt: string): AvailabilityRecor
   return rows.map(rowToRecord)
 }
 
-/** Latest snapshot regardless of cycle (used by the web read APIs later). */
-export function getAllAvailability(db: Db): AvailabilityRecord[] {
-  const rows = db.prepare('SELECT * FROM availability').all() as AvailabilityRow[]
+/**
+ * Latest snapshot, bounded to a date range (inclusive) — used by the web read
+ * model, which then applies isInScope (deals/scope.ts) for the geography/
+ * direction rule. Uses ix_avail_direction_date; unbounded rows outside any
+ * config's window are excluded without a full scan.
+ */
+export function getAvailabilityInWindow(db: Db, window: { startDate: string; endDate: string }): AvailabilityRecord[] {
+  const rows = db
+    .prepare('SELECT * FROM availability WHERE date >= ? AND date <= ?')
+    .all(window.startDate, window.endDate) as AvailabilityRow[]
   return rows.map(rowToRecord)
 }
 

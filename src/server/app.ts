@@ -98,7 +98,7 @@ export function buildApp(deps: AppDeps): Hono {
   app.get('/api/deals/oneway', (c) => {
     const q = c.req.query.bind(c.req)
     return c.json(
-      queryOneways(deps.db, deps.getConfig(), {
+      queryOneways(deps.db, deps.getConfig(), now(), {
         ...(q('origin') ? { origin: q('origin')!.toUpperCase() } : {}),
         ...(q('destination') ? { destination: q('destination')!.toUpperCase() } : {}),
         ...(q('home') ? { home: q('home')!.toUpperCase() } : {}),
@@ -122,7 +122,7 @@ export function buildApp(deps: AppDeps): Hono {
   app.get('/api/deals/roundtrip', (c) => {
     const q = c.req.query.bind(c.req)
     return c.json(
-      queryRoundtrips(deps.db, deps.getConfig(), {
+      queryRoundtrips(deps.db, deps.getConfig(), now(), {
         ...(q('origin') ? { origin: q('origin')!.toUpperCase() } : {}),
         ...(q('destination') ? { destination: q('destination')!.toUpperCase() } : {}),
         ...(parseIntOpt(q('maxTotal')) !== undefined ? { maxTotal: parseIntOpt(q('maxTotal'))! } : {}),
@@ -144,7 +144,7 @@ export function buildApp(deps: AppDeps): Hono {
     const direction = parseDirection(c.req.query('direction')) ?? 'outbound'
     const origin = c.req.query('origin')?.toUpperCase()
     const destination = c.req.query('destination')?.toUpperCase()
-    return c.json({ days: queryCalendar(deps.db, deps.getConfig(), direction, origin, destination) })
+    return c.json(queryCalendar(deps.db, deps.getConfig(), now(), direction, origin, destination))
   })
 
   app.get('/api/alerts', (c) => {

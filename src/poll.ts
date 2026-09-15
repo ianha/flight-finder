@@ -22,6 +22,7 @@ import { deriveWindow } from './config.js'
 import { estimatedRemaining as quotaRemaining } from './quota.js'
 import { detectOneways } from './deals/oneway.js'
 import { detectRoundtrips } from './deals/roundtrip.js'
+import { scopeFor, isInScope } from './deals/scope.js'
 import { filterForAlert, type AlertableDeal } from './deals/dedupe.js'
 import { QuotaExhaustedError, type ApiEndpoint, type SearchParams, type SearchResult } from './seatsAero.js'
 import type { Deal, OneWayDeal, RoundtripDeal, TripDetail } from './types.js'
@@ -234,8 +235,12 @@ async function runCycleLocked(
       notes.push(`${invalidCount} malformed records were skipped.`)
     }
 
-    // Detection runs on this cycle's fresh snapshot.
-    const fresh = getAvailabilitySeenAt(db, seenAt)
+    // Detection runs on this cycle's fresh snapshot, scoped by the SAME
+    // predicate the web console reads through (deals/scope.ts) — an off-grid
+    // record from the API (should never happen; defense in depth) can never be
+    // alerted on while staying invisible in the console, or vice versa.
+    const scope = scopeFor(cfg.search, window)
+    const fresh = getAvailabilitySeenAt(db, seenAt).filter((r) => isInScope(r, scope))
     const oneways = detectOneways(fresh, cfg)
     const roundtrips = detectRoundtrips(fresh, cfg)
 

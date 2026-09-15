@@ -41,6 +41,11 @@ export const KNOWN_SOURCES = [
 // Qatar Avios, so their own mileage cost is replaced by an estimated Avios price.
 export const PROXY_PRICED_SOURCES = ['american', 'alaska'] as const
 
+// Deal-key namespace shared by every proxy-priced source's estimate legs (see
+// onewayKey in deals/oneway.ts) — also accepted as a `source` query filter value
+// (queries.ts) and rendered as a single Program-dropdown option (Dashboard.tsx).
+export const ESTIMATE_SOURCE_KEY = 'avios-est' as const
+
 export const HARD_MAX_WINDOW_DAYS = 355
 
 export const APP_VERSION = '0.1.0'

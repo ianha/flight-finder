@@ -1,4 +1,5 @@
 import type { AppConfig } from '../shared/configSchema.js'
+import { ESTIMATE_SOURCE_KEY } from '../shared/constants.js'
 import type { AvailabilityRecord, DealLeg, OneWayDeal } from '../types.js'
 import { estimateForRecord } from './avios.js'
 
@@ -26,7 +27,7 @@ export function onewayKey(
   // Proxy-estimate legs share one key namespace: american and alaska surface the
   // same physical JAL/AA seats at the same estimated price, and alerting them
   // twice would be pure noise.
-  const keySource = leg.isEstimate ? 'avios-est' : leg.source
+  const keySource = leg.isEstimate ? ESTIMATE_SOURCE_KEY : leg.source
   return `OW|${keySource}|${leg.origin}|${leg.destination}|${leg.date}`
 }
 

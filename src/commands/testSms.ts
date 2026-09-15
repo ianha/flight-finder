@@ -3,6 +3,7 @@ import { loadConfig, readEnvSecrets, twilioCredsPresent } from '../config.js'
 import { SmsNotifier, smsConfigured, renderSms } from '../notify/sms.js'
 import type { DealDigest } from '../notify/notifier.js'
 import type { OneWayDeal } from '../types.js'
+import { ESTIMATE_SOURCE_KEY } from '../shared/constants.js'
 import { log } from '../log.js'
 
 function cannedDigest(): DealDigest {
@@ -26,7 +27,7 @@ function cannedDigest(): DealDigest {
   }
   const proxy: OneWayDeal = {
     kind: 'oneway',
-    key: 'OW|avios-est|LAX|HND|2027-04-02',
+    key: `OW|${ESTIMATE_SOURCE_KEY}|LAX|HND|2027-04-02`,
     availabilityId: 'test-2',
     source: 'american',
     program: 'BA/Qatar Avios (estimated)',

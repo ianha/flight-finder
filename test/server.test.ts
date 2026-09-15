@@ -29,10 +29,15 @@ import { TripDetailService, type TripsFetcher } from '../src/server/tripDetails.
 import { NotFoundError, type TripsFullResult } from '../src/seatsAero.js'
 import { getCallsUsed, utcDay } from '../src/db.js'
 
-function seed(db: Db, over: AvailabilityOverrides, direction: 'outbound' | 'return'): void {
+function seed(
+  db: Db,
+  over: AvailabilityOverrides,
+  direction: 'outbound' | 'return',
+  seenAt = '2026-08-15T12:00:00Z',
+): void {
   const rec = normalizeAvailability(makeAvailability(over), direction)
   assert.ok(rec)
-  upsertAvailability(db, rec, '2026-08-15T12:00:00Z')
+  upsertAvailability(db, rec, seenAt)
 }
 
 function seededDb(): Db {
@@ -46,6 +51,22 @@ function seededDb(): Db {
     'outbound',
   )
   seed(db, { id: 'r1', source: 'aeroplan', origin: 'NRT', destination: 'YYZ', date: '2026-11-16', jMileageCost: 70_000 }, 'return')
+  return db
+}
+
+/**
+ * Default config: origins [YYZ,ORD,YVR,LAX], destinations [NRT,HND], window
+ * [today, today+355]. Sibling of seededDb() with rows chosen to be out of
+ * scope on one dimension each — keeps seededDb()'s exact-count assertions
+ * untouched while giving the scope tests unambiguous signal.
+ */
+function scopeSeedDb(): Db {
+  const db = seededDb() // a1 (62.5k), a2 (85k conn), a3 (150k, excluded by threshold), p1 (est), r1 (return)
+  seed(db, { id: 'x1', source: 'aeroplan', origin: 'YYZ', destination: 'ICN', date: '2026-11-05', jMileageCost: 55_000 }, 'outbound') // wrong destination
+  seed(db, { id: 'x2', source: 'aeroplan', origin: 'JFK', destination: 'NRT', date: '2026-11-05', jMileageCost: 55_000 }, 'outbound') // wrong origin
+  seed(db, { id: 'x3', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2026-11-12', jMileageCost: 55_000 }, 'return') // same pair as a1, but stored direction only matches outbound geometry
+  seed(db, { id: 'x4', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2026-08-01', jMileageCost: 55_000 }, 'outbound') // before window start
+  seed(db, { id: 'x5', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2027-09-01', jMileageCost: 55_000 }, 'outbound') // after window end (> +355d)
   return db
 }
 
@@ -116,7 +137,42 @@ test('GET /api/status reports quota math, last cycle, and env presence', async (
     origins: ['YYZ', 'ORD', 'YVR', 'LAX'],
     destinations: ['NRT', 'HND'],
     destinationLabel: 'Tokyo',
+    sources: ['aeroplan', 'flyingblue', 'qatar'],
+    estimatesEnabled: true,
+    directOnly: false,
   })
+  assert.deepEqual(body.thresholds, { onewayMaxPoints: 90_000, roundtripMaxPoints: 180_000 })
+})
+
+test('GET /api/status configRevision reflects search/thresholds/roundtrip, not sms', async () => {
+  const app = makeApp(openDb(':memory:'), null)
+  const base = (await (await app.request('/api/status')).json()) as StatusResponse
+
+  const appSameConfig = makeApp(openDb(':memory:'), null)
+  const same = (await (await appSameConfig.request('/api/status')).json()) as StatusResponse
+  assert.equal(same.configRevision, base.configRevision)
+
+  const appDifferentThreshold = buildApp({
+    db: openDb(':memory:'),
+    getConfig: () => parseConfig({ thresholds: { onewayMaxPoints: 95_000 } }),
+    scheduler: null,
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: false }),
+    version: 'test',
+    now: () => NOW,
+  })
+  const different = (await (await appDifferentThreshold.request('/api/status')).json()) as StatusResponse
+  assert.notEqual(different.configRevision, base.configRevision)
+
+  const appDifferentSms = buildApp({
+    db: openDb(':memory:'),
+    getConfig: () => parseConfig({ sms: { to: ['+14165551234'], from: '+14165550000' } }),
+    scheduler: null,
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: false }),
+    version: 'test',
+    now: () => NOW,
+  })
+  const differentSms = (await (await appDifferentSms.request('/api/status')).json()) as StatusResponse
+  assert.equal(differentSms.configRevision, base.configRevision)
 })
 
 test('stale rate-limit header from a previous UTC day is ignored', async () => {
@@ -247,6 +303,159 @@ test('GET /api/availability/calendar returns per-date minima', async () => {
   const nov8 = body.days.find((d) => d.date === '2026-11-08')
   assert.equal(nov8?.minPoints, 77_250)
   assert.equal(nov8?.minPointsIsEstimate, true)
+})
+
+// ---------------------------------------------------------------------------
+// Config scoping (deals/scope.ts) — the read model must show exactly what the
+// current search.origins/destinations/window/directOnly/thresholds allow, and
+// nothing else, with no restart and no DB write.
+// ---------------------------------------------------------------------------
+
+test('deals read model is scoped to the configured geography and window', async () => {
+  const app = makeApp(scopeSeedDb(), null)
+
+  const oneway = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(oneway.total, 4) // unchanged by x1-x5, all off-grid on some dimension
+  assert.ok(!oneway.deals.some((d) => d.destination === 'ICN' || d.origin === 'JFK'))
+
+  const roundtrip = (await (await app.request('/api/deals/roundtrip')).json()) as RoundtripDealsResponse
+  assert.equal(roundtrip.pairs[0]?.totalPoints, 62_500 + 70_000) // still a1+r1
+
+  const calendar = (await (
+    await app.request('/api/availability/calendar?direction=outbound')
+  ).json()) as CalendarResponse
+  assert.ok(!calendar.days.some((d) => d.date === '2026-08-01' || d.date === '2027-09-01'))
+})
+
+test('a config change is honored by the next read without restart', async () => {
+  const db = seededDb()
+  let cfg = parseConfig({})
+  const app = buildApp({
+    db,
+    getConfig: () => cfg,
+    scheduler: null,
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: false }),
+    version: 'test',
+    now: () => NOW,
+  })
+
+  const initial = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(initial.total, 4)
+
+  cfg = parseConfig({ search: { origins: ['SFO'] } })
+  const afterUnrelatedOrigin = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(afterUnrelatedOrigin.total, 0)
+
+  // Swap origins/destinations entirely. r1 (NRT->YYZ, stored as `return`) stays
+  // hidden: as a return leg it needs origin(NRT) in the new destinations set,
+  // which no longer contains NRT.
+  cfg = parseConfig({ search: { origins: ['NRT', 'HND'], destinations: ['YYZ', 'ORD', 'LAX'] } })
+  const afterSwap = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(afterSwap.total, 0)
+
+  // A threshold override never widens geography back into scope.
+  const wideOverride = (await (
+    await app.request('/api/deals/oneway?maxPoints=10000000')
+  ).json()) as OneWayDealsResponse
+  assert.equal(wideOverride.total, 0)
+
+  // Re-fetching the SAME physical route as `outbound` (same PK as r1: source,
+  // origin, destination, date) rewrites the stored direction on conflict, so it
+  // re-enters scope under the new configuration.
+  seed(db, { id: 'r1-refetched', source: 'aeroplan', origin: 'NRT', destination: 'YYZ', date: '2026-11-16', jMileageCost: 70_000 }, 'outbound')
+  const afterRefetch = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(afterRefetch.total, 1)
+  assert.equal(afterRefetch.deals[0]?.origin, 'NRT')
+})
+
+test('roundtrip pairing never reaches outside the configured scope', async () => {
+  const db = seededDb()
+  // Cheap return from an out-of-config city, 10 nights after a1 — geometrically
+  // ineligible (KIX is not a configured destination) even though it is cheaper
+  // than r1 and would otherwise win the pairing.
+  seed(db, { id: 'kix-return', source: 'aeroplan', origin: 'KIX', destination: 'YYZ', date: '2026-11-15', jMileageCost: 30_000 }, 'return')
+  const app = makeApp(db, null)
+  const body = (await (await app.request('/api/deals/roundtrip')).json()) as RoundtripDealsResponse
+  assert.equal(body.pairs[0]?.totalPoints, 62_500 + 70_000)
+})
+
+test('GET /api/deals/oneway respects the configured date window', async () => {
+  const db = openDb(':memory:')
+  seed(db, { id: 'early', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2026-08-10', jMileageCost: 50_000 }, 'outbound') // safely before window start in any timezone
+  seed(db, { id: 'near', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2026-08-16', jMileageCost: 50_000 }, 'outbound') // safely within the default (starts today) window in any timezone
+  seed(db, { id: 'far', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2028-01-01', jMileageCost: 50_000 }, 'outbound') // well beyond the 355-day cap
+
+  const defaultApp = makeApp(db, null)
+  const withDefaultWindow = (await (await defaultApp.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(withDefaultWindow.total, 1)
+  assert.equal(withDefaultWindow.deals[0]?.availabilityId, 'near')
+
+  const shiftedApp = buildApp({
+    db,
+    getConfig: () => parseConfig({ search: { window: { startOffsetDays: 30 } } }),
+    scheduler: null,
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: false }),
+    version: 'test',
+    now: () => NOW,
+  })
+  const withShiftedWindow = (await (await shiftedApp.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(withShiftedWindow.total, 0) // 'near' (~1 day out) is now before the shifted window start
+})
+
+test('two in-scope rows fetched by different cycles are both visible (partial-quota safety)', async () => {
+  const db = openDb(':memory:')
+  seed(db, { id: 'cycle-1', source: 'aeroplan', origin: 'YYZ', destination: 'NRT', date: '2026-11-05', jMileageCost: 60_000 }, 'outbound', '2026-08-15T10:00:00Z')
+  seed(db, { id: 'cycle-2', source: 'qatar', origin: 'ORD', destination: 'HND', date: '2026-11-06', jMileageCost: 70_000 }, 'outbound', '2026-08-15T14:00:00Z')
+  const app = makeApp(db, null)
+  const body = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(body.total, 2)
+})
+
+test('search.directOnly config default is honored by default and overridable per request', async () => {
+  const app = buildApp({
+    db: seededDb(),
+    getConfig: () => parseConfig({ search: { directOnly: true } }),
+    scheduler: null,
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: false }),
+    version: 'test',
+    now: () => NOW,
+  })
+  const byDefault = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.ok(byDefault.deals.every((d) => d.direct))
+  assert.ok(!byDefault.deals.some((d) => d.origin === 'ORD')) // a2 (a connection) excluded by the config default
+
+  const overridden = (await (
+    await app.request('/api/deals/oneway?directOnly=false')
+  ).json()) as OneWayDealsResponse
+  assert.ok(overridden.deals.some((d) => d.origin === 'ORD' && !d.direct))
+})
+
+test('availabilityInScope counts in-scope rows before user filters; source=avios-est filters estimates', async () => {
+  const app = makeApp(seededDb(), null)
+  const all = (await (await app.request('/api/deals/oneway')).json()) as OneWayDealsResponse
+  assert.equal(all.availabilityInScope, 5) // a1, a2, a3, p1, r1 — all in scope regardless of the 90k threshold
+
+  const filtered = (await (await app.request('/api/deals/oneway?home=YYZ')).json()) as OneWayDealsResponse
+  assert.equal(filtered.availabilityInScope, 5) // unaffected by the user's own filters
+
+  const estimateOnly = (await (
+    await app.request('/api/deals/oneway?source=avios-est')
+  ).json()) as OneWayDealsResponse
+  assert.equal(estimateOnly.total, 1)
+  assert.ok(estimateOnly.deals[0]?.isEstimate)
+
+  const noProxyApp = buildApp({
+    db: seededDb(),
+    getConfig: () => parseConfig({ search: { proxySources: { enabled: false } } }),
+    scheduler: null,
+    envPresence: () => ({ seatsAeroApiKey: true, twilioCreds: false }),
+    version: 'test',
+    now: () => NOW,
+  })
+  const withoutEstimates = (await (
+    await noProxyApp.request('/api/deals/oneway')
+  ).json()) as OneWayDealsResponse
+  assert.equal(withoutEstimates.total, 3) // p1 dropped entirely — american is neither a direct source nor a proxy now
 })
 
 test('GET /api/alerts returns parsed detail JSON', async () => {

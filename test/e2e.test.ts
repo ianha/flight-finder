@@ -159,6 +159,30 @@ test('dry run returns a digest but writes no alert state and sends nothing', asy
   assert.equal(server.requests.filter((r) => r.endpoint === 'trips').length, 0)
 })
 
+test('runCycle ignores off-grid records from the API (poller/console parity)', async () => {
+  const opts = fixtureServerOptions()
+  // Simulate an API anomaly: an extra record outside the configured grid comes
+  // back on the outbound page (destination ICN is not in cfg.search.destinations).
+  // detects should exclude it exactly as the web read model would (deals/scope.ts).
+  opts.searchPagesByOrigin[OUTBOUND_KEY] = [
+    searchPage([
+      ...opts.searchPagesByOrigin[OUTBOUND_KEY]![0]!.data,
+      makeAvailability({ id: 'off-grid', source: 'aeroplan', origin: 'YYZ', destination: 'ICN', date: '2026-11-05', jMileageCost: 40_000 }),
+    ]),
+  ]
+  const server = await startMockServer(opts)
+  openServers.push(server)
+  const db = openDb(':memory:')
+  const notifier = new CaptureNotifier()
+
+  const outcome = await runCycle(deps(db, server.url, notifier), { trigger: 'manual' })
+  assert.equal(outcome.status, 'ok')
+  assert.equal(outcome.recordsFetched, 5) // the off-grid row is stored...
+  assert.equal(outcome.onewaysFound, 2) // ...but never detected as a deal
+  const digest = notifier.digests[0]!
+  assert.ok(!digest.oneways.some((o) => o.deal.destination === 'ICN'))
+})
+
 test('cycle aborts before any API call when the budget is exhausted', async () => {
   const server = await startMockServer(fixtureServerOptions())
   openServers.push(server)

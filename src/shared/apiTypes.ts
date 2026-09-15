@@ -53,8 +53,26 @@ export interface StatusResponse {
   scheduler: { intervalHours: number; nextRunAt: string | null } | null
   db: { path: string; availabilityRows: number; newestApiUpdatedAt: string | null }
   env: { seatsAeroApiKey: boolean; twilioCreds: boolean }
-  /** Search geography, so the frontend never hardcodes airports or "Tokyo". */
-  search: { origins: string[]; destinations: string[]; destinationLabel: string }
+  /** Config projection, so the frontend never hardcodes airports, programs, "Tokyo", or thresholds. */
+  search: {
+    origins: string[]
+    destinations: string[]
+    destinationLabel: string
+    /** Direct sources only — the Program filter's real-program options. */
+    sources: string[]
+    /** search.proxySources.enabled: whether the estimated-Avios option and the estimates toggle apply. */
+    estimatesEnabled: boolean
+    /** The console's default for "nonstop only"; the user may override per session. */
+    directOnly: boolean
+  }
+  thresholds: { onewayMaxPoints: number; roundtripMaxPoints: number }
+  /**
+   * Short fingerprint of {search, thresholds, roundtrip} — changes whenever the
+   * EFFECTIVE config changes (a no-op save does not bump it). Never derived from
+   * sms.* — see statusProjection.ts. Lets open Deals/Calendar tabs refetch
+   * promptly after a config save from elsewhere.
+   */
+  configRevision: string
 }
 
 export interface CyclesResponse {
@@ -107,11 +125,18 @@ export interface RoundtripDealDto {
 export interface OneWayDealsResponse {
   deals: OneWayDealDto[]
   total: number
+  /**
+   * In-scope availability rows (current config's geography + window) before
+   * detection and before any of this request's own filters — distinguishes
+   * "nothing qualifies" from "nothing fetched yet for this configuration".
+   */
+  availabilityInScope: number
 }
 
 export interface RoundtripDealsResponse {
   pairs: RoundtripDealDto[]
   total: number
+  availabilityInScope: number
 }
 
 export interface CalendarDay {
@@ -125,6 +150,7 @@ export interface CalendarDay {
 
 export interface CalendarResponse {
   days: CalendarDay[]
+  availabilityInScope: number
 }
 
 export interface AlertDto {
